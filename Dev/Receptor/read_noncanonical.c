@@ -112,7 +112,7 @@ int main(int argc, char *argv[])
             if(buf[i] == 0x7E && i != 0) break;
 	    }
 	for(int j=0; j<bytes;j++){
- 
+        printf("%02x\n", buf[j]);
 		switch(state){
 			case START:
 				if(buf[j]== FLAG){
@@ -160,14 +160,14 @@ int main(int argc, char *argv[])
 				break;
 			case STP:
 				printf("stop\n");
-				STOP = TRUE ;
+				//STOP = TRUE ;
 		       		break;
 
 		}	
 		if(STOP==TRUE) break;
 
 	}
-        if((buf[1] ^ buf[2]) == buf[3]){
+        if(state == STP){
 	            printf("CORRECT\n");
             buf_ua[0] = FLAG;              //
             buf_ua[1] = ADDRESS_UA;           //
@@ -179,11 +179,9 @@ int main(int argc, char *argv[])
             int bytes = write(fd, buf_ua, BUF_SIZE);
             printf("%d bytes written\n", bytes);
             sleep(1);
-        } else {
-            break;
-        }
-//	j++;
-       // STOP= TRUE ;
+            state = START;
+        } 
+
     }
 
     // The while() cycle should be changed in order to respect the specifications

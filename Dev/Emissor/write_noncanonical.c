@@ -10,6 +10,7 @@
 #include <sys/stat.h>
 #include <termios.h>
 #include <unistd.h>
+#include <signal.h>
 
 // Baudrate settings are defined in <asm/termbits.h>, which is
 // included by <termios.h>
@@ -19,7 +20,7 @@
 #define FALSE 0
 #define TRUE 1
 
-#define BUF_SIZE 256
+#define BUF_SIZE 16 //256
 
 #define FLAG      0x7E
 #define ADDRESS   0x03
@@ -28,8 +29,21 @@
 
 volatile int STOP = FALSE;
 
+int alarmEnabled = FALSE;
+int alarmCount = 0;
+
+// Alarm function handler
+void alarmHandler(int signal)
+{
+    alarmEnabled = FALSE;
+    alarmCount++;
+
+    printf("Alarm #%d\n", alarmCount);
+}
+
 int main(int argc, char *argv[])
 {
+    (void)signal(SIGALRM, alarmHandler);
     // Program usage: Uses either COM1 or COM2
     const char *serialPortName = argv[1];
 
@@ -72,8 +86,8 @@ int main(int argc, char *argv[])
 
     // Set input mode (non-canonical, no echo,...)
     newtio.c_lflag = 0;
-    newtio.c_cc[VTIME] = 0; // Inter-character timer unused
-    newtio.c_cc[VMIN] = 5;  // Blocking read until 5 chars received
+    newtio.c_cc[VMIN] = 0;  // Blocking read until 5 chars received
+    newtio.c_cc[VTIME] = 5; // Inter-character timer unused
 
     // VTIME e VMIN should be changed in order to protect with a
     // timeout the reception of the following character(s)
@@ -115,16 +129,32 @@ int main(int argc, char *argv[])
     // The whole buffer must be sent even with the '\n'.
     //buf[5] = '\n';
 
-    int bytes = write(fd, buf, BUF_SIZE);
-    printf("%d bytes written\n", bytes);
+    
 
     // Wait until all bytes have been written to the serial port
-    sleep(1);
+    //sleep(1);
 
     unsigned char buf_ua[BUF_SIZE + 1] = {0};
+    int bytes;
+    int bytes_read = 0;
+    while (alarmCount < 3){
+        if (alarmEnabled == FALSE)
+        {
+            bytes = write(fd, buf, BUF_SIZE);
+            printf("%d bytes written\n", bytes);
+            alarm(3); // Set alarm to be triggered in 3s
+            alarmEnabled = TRUE;
+        }
+        bytes_read = read(fd, buf_ua, BUF_SIZE);
+        buf_ua[bytes_read] = '\0'; // Set end of string to '\0', so we can printf
+
+        if(bytes_read != 0){
+            alarm(0);
+            printf("WORKED! XD\n");
+            break;
+        }
+    }
     
-    bytes = read(fd, buf_ua, BUF_SIZE);
-    buf_ua[bytes] = '\0'; // Set end of string to '\0', so we can printf
 
     printf(":%s:%d\n", buf_ua, bytes);
     for(int i=0;i< bytes;i++){
