@@ -100,6 +100,11 @@ int main(int argc, char *argv[])
         printf(":%s:%d\n", buf, bytes);
         if (buf[0] == 'z')
             STOP = TRUE;
+        
+        for(int i = 0; i < BUF_SIZE; i++){
+            if(buf[i] == 0)continue;
+            printf("%02x\n", buf[i]);
+        }
     }
 
     // The while() cycle should be changed in order to respect the specifications
