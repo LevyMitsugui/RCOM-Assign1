@@ -41,6 +41,19 @@ void alarmHandler(int signal)
     printf("Alarm #%d\n", alarmCount);
 }
 
+u_int8_t byte_xor(u_int8_t byte1, u_int8_t byte2){
+    return byte1^byte2;
+}
+// u_int8_t byte_xor(u_int8_t *array[], int arr_size){
+//     unsigned char ret_xor = 0;
+//     for (int i = 0; i<arr_size; i++){
+//         ret_xor = array[i] = ret_xor;
+//     }
+//     return ret_xor;
+// }
+
+
+
 int main(int argc, char *argv[])
 {
     (void)signal(SIGALRM, alarmHandler);
@@ -114,7 +127,7 @@ int main(int argc, char *argv[])
     buf[0] = FLAG;              //~
     buf[1] = ADDRESS;           //3
     buf[2] = CONTROL;           //
-    buf[3] = ADDRESS ^ CONTROL; //
+    buf[3] = byte_xor(buf[1], buf[2]); //ADDRESS ^ CONTROL; //
     //buf[3] = ADDRESS + TEST;
     buf[4] = FLAG; //
 

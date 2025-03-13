@@ -11,6 +11,7 @@
 #include <sys/stat.h>
 #include <termios.h>
 #include <unistd.h>
+#include <time.h>
 
 // Baudrate settings are defined in <asm/termbits.h>, which is
 // included by <termios.h>
@@ -26,12 +27,19 @@
 #define CONTROL_UA     0x07
 #define ADDRESS_SET  0x03
 #define CONTROL_SET 0x03 
+
 volatile int STOP = FALSE;
 enum STATE { START, FLAG_RCV, A_RCV, C_RCV, BCC_OK , STP};
+
 int main(int argc, char *argv[])
 {
 	enum STATE state;
 	state= START;
+
+
+    struct tm* ptr;
+    time_t t;
+
     // Program usage: Uses either COM1 or COM2
     const char *serialPortName = argv[1];
 
@@ -105,70 +113,73 @@ int main(int argc, char *argv[])
         int bytes = read(fd, buf, BUF_SIZE);
         buf[bytes] = '\0'; // Set end of string to '\0', so we can printf
 
+        t = time(NULL);
+        ptr = localtime(&t);
+        printf("Message received at: %s", asctime(ptr));
+
         printf(":%s:%d\n", buf, bytes);
         for(int i=0;i< bytes;i++){
             //if(buf[i] == 0x00) break;
 		    printf("%02x\n",buf[i]);
             if(buf[i] == 0x7E && i != 0) break;
 	    }
-	for(int j=0; j<bytes;j++){
-        printf("%02x\n", buf[j]);
-		switch(state){
-			case START:
-				if(buf[j]== FLAG){
-					state= FLAG_RCV;
-				}
-                else state=START;
-				printf("start\n");
-				break;
-			case FLAG_RCV:
-				if(buf[j]== ADDRESS_SET){
-					state=A_RCV;
-				}
-                else if(buf[j]== FLAG){
-                    state=FLAG_RCV;                
-                }
-                else state= START;
-				printf("flag\n");
-				break;
-			case A_RCV:
-				if(buf[j]== CONTROL_SET){
-					state = C_RCV;
-				}
-                else if(buf[j]== FLAG){
-                    state=FLAG_RCV;                
-                }
-                else state= START;
-				printf("adress\n");
-				break;
-			case C_RCV:
-				if(buf[j] == (ADDRESS_SET ^ CONTROL_SET)){
-					state = BCC_OK;
-				}
-                else if(buf[j]== FLAG){
-                    state=FLAG_RCV;                
-                }
-                else state= START;
-				printf("control\n");
-				break;
-			case BCC_OK:
-				if(buf[j] == FLAG){
-					state=STP;
-				}
-                else state= START;
- 				printf("BCC\n");
-				break;
-			case STP:
-				printf("stop\n");
-				//STOP = TRUE ;
-		       		break;
+        for(int j=0; j<bytes;j++){
+            switch(state){
+                case START:
+                    if(buf[j]== FLAG){
+                        state= FLAG_RCV;
+                    }
+                    else state=START;
+                    printf("start\n");
+                    break;
+                case FLAG_RCV:
+                    if(buf[j]== ADDRESS_SET){
+                        state=A_RCV;
+                    }
+                    else if(buf[j]== FLAG){
+                        state=FLAG_RCV;                
+                    }
+                    else state= START;
+                    printf("flag\n");
+                    break;
+                case A_RCV:
+                    if(buf[j]== CONTROL_SET){
+                        state = C_RCV;
+                    }
+                    else if(buf[j]== FLAG){
+                        state=FLAG_RCV;                
+                    }
+                    else state= START;
+                    printf("adress\n");
+                    break;
+                case C_RCV:
+                    if(buf[j] == (ADDRESS_SET ^ CONTROL_SET)){
+                        state = BCC_OK;
+                    }
+                    else if(buf[j]== FLAG){
+                        state=FLAG_RCV;                
+                    }
+                    else state= START;
+                    printf("control\n");
+                    break;
+                case BCC_OK:
+                    if(buf[j] == FLAG){
+                        state=STP;
+                    }
+                    else state= START;
+                    printf("BCC\n");
+                    break;
+                case STP:
+                    printf("stop\n");
+                    //STOP = TRUE ;
+                        break;
 
-		}	
-		if(STOP==TRUE) break;
+            }	
+            if(STOP==TRUE) break;
 
-	}
+        }
         if(state == STP){
-	            printf("CORRECT\n");
+	        printf("CORRECT\n");
             buf_ua[0] = FLAG;              //
             buf_ua[1] = ADDRESS_UA;           //
             buf_ua[2] = CONTROL_UA;           //
