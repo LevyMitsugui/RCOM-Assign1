@@ -95,6 +95,7 @@ int main(int argc, char *argv[])
     {
         // Returns after 5 chars have been input
         int bytes = read(fd, buf, BUF_SIZE);
+        int last_FLAG_idx = 0;
         buf[bytes] = '\0'; // Set end of string to '\0', so we can printf
 
         printf(":%s:%d\n", buf, bytes);
@@ -102,8 +103,9 @@ int main(int argc, char *argv[])
             STOP = TRUE;
         
         for(int i = 0; i < BUF_SIZE; i++){
-            if(buf[i] == 0)continue;
+            if(last_FLAG_idx>0)break;
             printf("%02x\n", buf[i]);
+            if(buf[i]==0x7e) last_FLAG_idx = i;
         }
     }
 
