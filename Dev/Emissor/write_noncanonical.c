@@ -21,13 +21,16 @@
 #define TRUE 1
 
 #define BUF_SIZE 32 //256
+#define PACKET_SIZE 11//BUF_SIZE-6
 
 #define FLAG      0x7E
 #define ADDRESS   0x03
 #define CONTROL   0x03
 #define TEST      0x01
 
-//#define DEBUG
+#define FILE_NAME "penguin.gif"
+
+#define DEBUG
 
 volatile int STOP = FALSE;
 
@@ -116,6 +119,9 @@ void setFrame_DATA(u_int8_t* buf, u_int8_t* data_packet, uid_t packet_size, u_in
  */
 int confirm_frame(u_int8_t* receiver_buf);
 
+long get_file_size(FILE* file_pointer);
+int retreive_packet(FILE* file_pointer, u_int8_t* packet_array, uid_t packet_size, long file_size);
+
 int main(int argc, char *argv[])
 {
     (void)signal(SIGALRM, alarmHandler);
@@ -188,10 +194,31 @@ int main(int argc, char *argv[])
     macro_state = SET;
 
     unsigned char buf[BUF_SIZE] = {0};
+    unsigned char packet_even[BUF_SIZE] = {0};
+    unsigned char packet_odd[BUF_SIZE] = {0};
     unsigned char buf_ua[BUF_SIZE + 1] = {0};
     
-    u_int8_t mock_data_packet[] = {0x1e, 0x23, 0x7e, 0x5e, 0xea, 0xa2, 0x12, 0x24, 0x7e, 0x59, 0x42};
-    uid_t mock_packet_size = 11;
+    FILE* file_pointer;
+    file_pointer = fopen(FILE_NAME, "rb");
+    long file_size = get_file_size(file_pointer);
+    if (file_pointer == NULL) {
+        printf("The file is not opened. The program will "
+               "now exit.");
+        exit(0);
+    }else {
+        printf("The file is created Successfully.\n");
+    }
+  
+
+    // u_int8_t mock_data_packet[] = {0x1e, 0x23, 0x7e, 0x5e, 0x7e, 0xa2, 0x12, 0x24, 0x7e, 0x59, 0x42};
+    // u_int8_t mock_data_packet[] = {0x47, 0x49, 0x46, 0x38, 0x39, 0x61, 0x01, 0x01, 0x2f, 0x01, 0xf5};
+    // uid_t mock_packet_size = 11;
+    u_int8_t mock_data_packet[PACKET_SIZE] = {0};
+    uid_t mock_packet_size = PACKET_SIZE;
+    retreive_packet(file_pointer, mock_data_packet, mock_packet_size, file_size);
+    for(int i=0; i<mock_packet_size; i++){
+        printf("from retrieve Packet[%d]: %02x\n", i, mock_data_packet[i]);
+    }
 
     int bytes_read = 0;
     for(int i = 0; i<3; i++){
@@ -214,7 +241,18 @@ int main(int argc, char *argv[])
         break;
 
     case DATA:
+        // for(int i=0; i<mock_packet_size; i++){
+        //     printf("Packet[%d]: %02x\n", i, mock_data_packet);
+        // }
+
         setFrame_DATA(buf, mock_data_packet, mock_packet_size, 0x00);
+        
+        printf(":%s:%d\n", buf, bytes_read);
+        for(int i=0;i< BUF_SIZE;i++){
+            printf("%02x\n",buf[i]);
+            if(buf[i] == 0x7E && i != 0) break;
+        }
+    
         bytes_read = send_frame(buf, buf_ua, 3, 3, fd);
         if (bytes_read <= 0){
             printf("Did not receive message or message received was not as expected. Terminating code\n");
@@ -279,8 +317,7 @@ int send_frame(u_int8_t*sender_buf, u_int8_t* receiver_buf, uid_t attempts, uid_
     int bytes_read = 0;
 
     while (alarmCount < attempts){
-        if (alarmEnabled == FALSE)
-        {
+        if (alarmEnabled == FALSE){
             bytes = write(fd, sender_buf, BUF_SIZE);
             alarm(3); // Set alarm to be triggered in 3s
             alarmEnabled = TRUE;
@@ -309,13 +346,20 @@ int send_frame(u_int8_t*sender_buf, u_int8_t* receiver_buf, uid_t attempts, uid_
 int stuff_bytes(u_int8_t* data_packet, u_int8_t* buf, uid_t packet_size, uid_t offset){
     int n_stuffed_bytes = 0;
     for(int i = 0; i<packet_size; i ++){
+        //printf("%02x\n",data_packet[i]);
+
         if(data_packet[i] == 0x7e){
             buf[offset + i + n_stuffed_bytes]= 0x7d;
-            buf[offset + i + n_stuffed_bytes + 1]= 0x5e;
             n_stuffed_bytes++;
+            buf[offset + i + n_stuffed_bytes]= 0x5e;
         } else {
             buf[offset+ i + n_stuffed_bytes] = data_packet[i];
         }
+    }
+
+    for(int i=0;i< BUF_SIZE;i++){
+        
+        if(buf[i] == 0x7E && i != 0) break;
     }
     return n_stuffed_bytes;
 } 
@@ -333,10 +377,9 @@ void setFrame_DATA(u_int8_t* buf, u_int8_t* data_packet, uid_t packet_size, u_in
     buf[0] = FLAG;
     buf[1] = ADDRESS;
     buf[2] = control;
-    buf[3] = byte_xor(buf[1], buf[2]); 
+    buf[3] = buf[1] ^ buf[2]; 
     //Assemble Data Packet W/ byte stuffing
     int added_bytes = stuff_bytes(data_packet, buf, packet_size, 4); //number of bytes added by the stuffing function
-
     
     buf[4+packet_size+added_bytes] = array_xor(data_packet, packet_size, 0, packet_size-1); //BCC2
     buf[4+packet_size+added_bytes+1] = FLAG;                                              //FLAG
@@ -348,6 +391,33 @@ void setFrame_DATA(u_int8_t* buf, u_int8_t* data_packet, uid_t packet_size, u_in
     #endif
 }
 
+long get_file_size(FILE* file_pointer){
+    fseek(file_pointer, 0, SEEK_END);
+    long ret = ftell(file_pointer);
+    rewind(file_pointer);
+    return ret;
+}
+
+int retreive_packet(FILE* file_pointer, u_int8_t* packet_array, uid_t packet_size, long file_size){
+
+    if(ftell(file_pointer) >= file_size) return -1;
+
+    float remainder_bytes = (file_size%packet_size);
+    if((file_size - remainder_bytes) <= ftell(file_pointer)){
+
+        fread(packet_array, 1, remainder_bytes, file_pointer);
+        for(int i=remainder_bytes; i<packet_size;i++){
+            packet_array[i] = 0;
+        }
+    } else {
+        fread(packet_array, 1, packet_size, file_pointer);
+    }
+
+    // for(int i=0; i<packet_size; i++){
+    //     printf("packet[%d]: %02x\n", i, packet_array[i]);
+    // }
+    return 1;
+} 
 
 int confirm_frame(u_int8_t* receiver_buf){
     enum READ_STATE read_state;
