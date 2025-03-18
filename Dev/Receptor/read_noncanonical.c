@@ -25,11 +25,16 @@
 #define FLAG        0x7E
 #define ADDRESS_UA 	0x01
 #define CONTROL_UA     0x07
+#define CONTROL_RR0  0x05
+#define CONTROL_RR1  0x85
+#define CONTROL_REJ0  0x01
+#define CONTROL_REJ1  0x81
+#define CONTROL_DISC  0x0B
 #define ADDRESS_SET  0x03
 #define CONTROL_SET 0x03 
 
 volatile int STOP = FALSE;
-enum STATE { START, FLAG_RCV, A_RCV, C_RCV, BCC_OK , STP};
+enum STATE { START, FLAG_RCV, A_RCV, C_RCV, BCC_OK, DATA, BCC2, STP};
 
 int main(int argc, char *argv[])
 {
@@ -106,6 +111,9 @@ int main(int argc, char *argv[])
     // Loop for input
     unsigned char buf[BUF_SIZE + 1] = {0}; // +1: Save space for the final '\0' char
     unsigned char buf_ua[BUF_SIZE] = {0};
+    unsigned char buf_store[BUF_SIZE]={0};
+    int count =0;
+    int cntrol=3;
 //	int j=0;
     while (STOP == FALSE)
     {
@@ -128,47 +136,97 @@ int main(int argc, char *argv[])
                 case START:
                     if(buf[j]== FLAG){
                         state= FLAG_RCV;
+                        buf_store[count]= FLAG;
+                        count ++;
                     }
-                    else state=START;
+                    else{
+                        state=START;
+                        count=0; 
+                    }
                     printf("start\n");
                     break;
                 case FLAG_RCV:
                     if(buf[j]== ADDRESS_SET){
                         state=A_RCV;
+                        buf_store[count]= ADDRESS_SET ;
+                        count++;
                     }
                     else if(buf[j]== FLAG){
-                        state=FLAG_RCV;                
+                        state=FLAG_RCV;
+                        count=0;                
                     }
-                    else state= START;
+                    else {
+                        state= START;
+                        count=0; 
+                    }
                     printf("flag\n");
                     break;
                 case A_RCV:
                     if(buf[j]== CONTROL_SET){
                         state = C_RCV;
+                        buf_store[count]= CONTROL_SET ;
+                        count++;
+                        control=3;
+                    }
+                    else if(buf[j] == 0x00){
+                        state = C_RCV;
+                        buf_store[count]= 0x00 ;
+                        count++;
+                        control=0;
+                    }
+                    else if(buf[j] == 0x40){
+                        state = C_RCV;
+                        buf_store[count]= 0x40 ;
+                        count++;
+                        control=4;
                     }
                     else if(buf[j]== FLAG){
-                        state=FLAG_RCV;                
+                        state=FLAG_RCV; 
+                        count=0;               
                     }
-                    else state= START;
+                    else{
+                        state= START;
+                        count=0;
+                    }
                     printf("adress\n");
                     break;
                 case C_RCV:
                     if(buf[j] == (ADDRESS_SET ^ CONTROL_SET)){
                         state = BCC_OK;
+                        buf_store[count]= (ADDRESS_SET ^ CONTROL_SET);
+                        count++;
                     }
                     else if(buf[j]== FLAG){
-                        state=FLAG_RCV;                
+                        state=FLAG_RCV; 
+                        count=0;               
                     }
-                    else state= START;
+                    else{ 
+                        state= START;
+                        count=0;
+                    }
                     printf("control\n");
                     break;
                 case BCC_OK:
-                    if(buf[j] == FLAG){
-                        state=STP;
+                    if( control == 0 || control == 4){
+                        state= DATA;           
                     }
                     else state= START;
                     printf("BCC\n");
                     break;
+                case DATA:
+                    if (buf[j]== 0x7d && buf[j+1]== 0x5e){
+                        buf_store[count]=0x7e;
+                        j++;
+                        count++;
+                    }
+                    else {
+                        buf_store[count]=buf[j];
+                        count++;
+                    }
+                    
+                    /*state= BCC2;
+                    break;*/
+               // case BCC2:
                 case STP:
                     printf("stop\n");
                     //STOP = TRUE ;
