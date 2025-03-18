@@ -114,6 +114,8 @@ int main(int argc, char *argv[])
     unsigned char buf_store[BUF_SIZE]={0};
     int count =0;
     int cntrol=3;
+    int dat=0;
+    unsigned char bcc2;
 //	int j=0;
     while (STOP == FALSE)
     {
@@ -214,23 +216,39 @@ int main(int argc, char *argv[])
                     printf("BCC\n");
                     break;
                 case DATA:
+                   
                     if (buf[j]== 0x7d && buf[j+1]== 0x5e){
                         buf_store[count]=0x7e;
                         j++;
                         count++;
+                        dat+=1;
                     }
                     else {
                         buf_store[count]=buf[j];
                         count++;
+                        dat+=1;
                     }
+                    if(buf[j]==0x7E){
+                        buf_store[count]=buf[j];
+                        state= BCC2;
+                    }
+                    bcc2=buf_store[count-dat-1];
+                    break;
+                case BCC2:  
+                    for (int h=(count-dat);h<(count-2);h++ ){ // pega no segundo de data até ao buf -flag -bcc2 e faz xor e guarda em bcc2
+                       bcc2 = (bcc2 ^ buf_store[h])    
+                       
+                    }
+                    if(bcc2==buf_store[count-1]){ //caso bcc2 esteja igual ao penultimo elemento do bufferstore avança para stop pois já deu store da flag 
+                        state=STP;
+                    }
+                  //   else CONTROL_REJ1
                     
-                    /*state= BCC2;
-                    break;*/
-               // case BCC2:
+                    break;
                 case STP:
                     printf("stop\n");
                     //STOP = TRUE ;
-                        break;
+                    break;
 
             }	
             if(STOP==TRUE) break;
