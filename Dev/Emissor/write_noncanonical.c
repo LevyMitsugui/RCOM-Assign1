@@ -37,11 +37,11 @@
 
 #define FILE_NAME "penguin.gif"
 
-#define DEBUG
+//#define DEBUG
 
 volatile int STOP = FALSE;
 
-enum OP_STATE {SET, CONFIRM_UA, CONFIRM, DATA_1, DATA_2, OP_STP};
+enum OP_STATE {SET, CONFIRM_UA, GET_0, GET_1, CONFIRM_0, CONFIRM_1, DATA_1, DATA_2, OP_STP};
 enum READ_STATE { START, FLAG_RCV, A_RCV, C_RCV, BCC_OK , STP};
 
 int alarmEnabled = FALSE;
@@ -52,6 +52,14 @@ void alarmHandler(int signal)
     alarmEnabled = FALSE;
     alarmCount++;
 }
+
+struct FILE_INFO{
+    FILE *fp;
+    long file_size;
+    int packet_size;
+    int n_packets;
+    int current_packet;
+};
 
 /**
  * @brief Does a simple xor operation between two unsigned chars.
@@ -125,12 +133,15 @@ void setFrame_DATA(u_int8_t* buf, u_int8_t* data_packet, uid_t packet_size, u_in
  * @param control_variable Variable to store the control byte.
  * @return int - 1 if expected message, -1 otherwise.
  */
-int confirm_frame(u_int8_t* receiver_buf, u_int8_t control_variable);
+int confirm_frame(u_int8_t* receiver_buf, u_int8_t* control_variable);
 
 int confirm_frame_UA(u_int8_t* receiver_buf);
 
 long get_file_size(FILE* file_pointer);
 int retrieve_packet(FILE* file_pointer, u_int8_t* packet_array, uid_t packet_size, long file_size);
+
+
+int file_row_back(file_info.fp, file_size, mock_packet_size);
 
 int main(int argc, char *argv[])
 {
@@ -204,20 +215,25 @@ int main(int argc, char *argv[])
     macro_state = SET;
 
     unsigned char buf[BUF_SIZE] = {0};
-    unsigned char packet_even[BUF_SIZE] = {0};
-    unsigned char packet_odd[BUF_SIZE] = {0};
+    unsigned char packet_0[BUF_SIZE] = {0};
+    unsigned char packet_1[BUF_SIZE] = {0};
     unsigned char buf_ua[BUF_SIZE + 1] = {0};
     
-    FILE* file_pointer;
-    file_pointer = fopen(FILE_NAME, "rb");
-    long file_size = get_file_size(file_pointer);
-    if (file_pointer == NULL) {
+    struct FILE_INFO file_info;
+    file_info.fp = fopen(FILE_NAME, "rb");
+    if (file_info.fp == NULL) {
         printf("The file is not opened. The program will "
                "now exit.");
         exit(0);
-    }else {
+    } else {
+        #ifdef DEBUG
         printf("The file is created Successfully.\n");
+        #endif
     }
+    file_info.file_size = get_file_size(file_info.fp);
+    file_info.packet_size = PACKET_SIZE;
+    file_info.n_packets = (int) file_info.file_size/file_info.packet_size;
+    file_info.current_packet = 0;
   
 
     // u_int8_t mock_data_packet[] = {0x1e, 0x23, 0x7e, 0x5e, 0x7e, 0xa2, 0x12, 0x24, 0x7e, 0x59, 0x42};
@@ -225,7 +241,7 @@ int main(int argc, char *argv[])
     // uid_t mock_packet_size = 11;
     u_int8_t mock_data_packet[PACKET_SIZE] = {0};
     uid_t mock_packet_size = PACKET_SIZE;
-    retrieve_packet(file_pointer, mock_data_packet, mock_packet_size, file_size);
+    retrieve_packet(file_info.fp, mock_data_packet, mock_packet_size, file_info.file_size);
     for(int i=0; i<mock_packet_size; i++){
         printf("from retrieve Packet[%d]: %02x\n", i, mock_data_packet[i]);
     }
@@ -247,64 +263,60 @@ int main(int argc, char *argv[])
                 }
                 break;
 
+            case GET_0:
+                retrieve_packet(file_info.fp, mock_data_packet, mock_packet_size, file_info.file_size);
+
             case CONFIRM_UA:
                 if (confirm_frame_UA(buf_ua) == -1){
-                    macro_state = DATA;
+                    macro_state = DATA_1;
                 } else {
                     macro_state = SET;
                 }
                 break;
 
-            case CONFIRM:
-                if (confirm_frame(buf_ua, control_received) != -1){
-                } else {
+            case CONFIRM_0:
+                
+            
+                if (confirm_frame(buf_ua, &control_received) == -1)
                     macro_state = SET; //ERROR IN THE FRAME RECEIVED
-                }
-                break;
-
-            case DATA_1:
-                // for(int i=0; i<mock_packet_size; i++){
-                //     printf("Packet[%d]: %02x\n", i, mock_data_packet);
-                // }
-
-                setFrame_DATA(buf, mock_data_packet, mock_packet_size, 0x00);
                 
-                printf(":%s:%d\n", buf, bytes_read);
-                for(int i=0;i< BUF_SIZE;i++){
-                    printf("%02x\n",buf[i]);
-                    if(buf[i] == 0x7E && i != 0) break;
+                if (control_received == CONTROL_RR0){
+                    macro_state = GET_0;
+                } else if (control_received == CONTROL_RR1){
+                    macro_state = GET_1;
+                } else if (control_received == CONTROL_REJ0){
+                    //CONTROL_REJ0: receiver rejected frame 0 and we have to send the same frame again
+                    //fseek(file_info.fp, -file_info.packet_size, SEEK_CUR); //rows back one packet
+                    //macro_state = GET_0;
+                    macro_state = SEND_0;
+                } else if (control_received == CONTROL_REJ1){
+                    //fseek(file_info.fp, -file_info.packet_size, SEEK_CUR);
+                    //macro_state = GET_1;
                 }
-            
-                bytes_read = send_frame(buf, buf_ua, 3, 3, fd);
-                if (bytes_read <= 0){
-                    printf("Did not receive message or message received was not as expected. Terminating code\n");
-                    macro_state = OP_STP;
-                } else {
-                    macro_state = CONFIRM;
-                }
+
                 break;
 
-            case DATA_2:
-                // for(int i=0; i<mock_packet_size; i++){
-                //     printf("Packet[%d]: %02x\n", i, mock_data_packet);
-                // }
+            // case DATA_1:
+            //     // for(int i=0; i<mock_packet_size; i++){
+            //     //     printf("Packet[%d]: %02x\n", i, mock_data_packet);
+            //     // }
 
-                setFrame_DATA(buf, mock_data_packet, mock_packet_size, 0x40);
+            //     setFrame_DATA(buf, mock_data_packet, mock_packet_size, 0x00);
                 
-                printf(":%s:%d\n", buf, bytes_read);
-                for(int i=0;i< BUF_SIZE;i++){
-                    printf("%02x\n",buf[i]);
-                    if(buf[i] == 0x7E && i != 0) break;
-                }
+            //     printf(":%s:%d\n", buf, bytes_read);
+            //     for(int i=0;i< BUF_SIZE;i++){
+            //         printf("%02x\n",buf[i]);
+            //         if(buf[i] == 0x7E && i != 0) break;
+            //     }
             
-                bytes_read = send_frame(buf, buf_ua, 3, 3, fd);
-                if (bytes_read <= 0){
-                    printf("Did not receive message or message received was not as expected. Terminating code\n");
-                    macro_state = OP_STP;
-                } else {
-                    macro_state = CONFIRM;
-                }
-                break;
+            //     bytes_read = send_frame(buf, buf_ua, 3, 3, fd);
+            //     if (bytes_read <= 0){
+            //         printf("Did not receive message or message received was not as expected. Terminating code\n");
+            //         macro_state = OP_STP;
+            //     } else {
+            //         macro_state = CONFIRM_1;
+            //     }
+            //     break;
 
             case OP_STP:
                 break;
@@ -372,11 +384,13 @@ int send_frame(u_int8_t*sender_buf, u_int8_t* receiver_buf, uid_t attempts, uid_
 
         if(bytes_read != 0){
             alarm(0);
-            if (receiver_buf[2] == 0x07)
+            if (receiver_buf[1] == 0x01)
                 if ((receiver_buf[1] ^ receiver_buf[2]) == receiver_buf[3]) {
-                    printf("UA received and is Correct\n");
+                    #ifdef DEBUG
+                    printf("BCC1 ok\n");
+                    #endif
                 } else { 
-                    printf("Something went wrong");
+                    printf("BCC1 error\n");
                     return -1;
                 }
             break;
@@ -538,7 +552,7 @@ int confirm_frame(u_int8_t* receiver_buf, u_int8_t* control){
                 else read_state= START;
                 break;
             case A_RCV:
-                if(receiver_buf[j] == control){
+                if(receiver_buf[j] == *control){
                     read_state = C_RCV;
                 }
                 else if(receiver_buf[j]== FLAG){
