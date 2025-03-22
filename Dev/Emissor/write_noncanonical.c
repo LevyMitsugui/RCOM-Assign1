@@ -27,6 +27,9 @@
 #define ADDRESS_SET     0x03
 #define CONTROL_SET     0x03 
 
+#define CONTROL_FRAME_0 0x00
+#define CONTROL_FRAME_1 0x40
+
 #define ADDRESS_UA  	0x01
 #define CONTROL_UA      0x07
 #define CONTROL_RR0     0x05
@@ -41,7 +44,7 @@
 
 volatile int STOP = FALSE;
 
-enum OP_STATE {SET, CONFIRM_UA, GET_0, GET_1, CONFIRM_0, CONFIRM_1, DATA_1, DATA_2, OP_STP};
+enum OP_STATE {SET, CONFIRM_UA, GET_0, GET_1, CONFIRM, SEND, OP_STP};
 enum READ_STATE { START, FLAG_RCV, A_RCV, C_RCV, BCC_OK , STP};
 
 int alarmEnabled = FALSE;
@@ -141,10 +144,7 @@ long get_file_size(FILE* file_pointer);
 int retrieve_packet(FILE* file_pointer, u_int8_t* packet_array, uid_t packet_size, long file_size);
 
 
-int file_row_back(file_info.fp, file_size, mock_packet_size);
-
-int main(int argc, char *argv[])
-{
+int main(int argc, char *argv[]){
     (void)signal(SIGALRM, alarmHandler);
     // Program usage: Uses either COM1 or COM2
     const char *serialPortName = argv[1];
@@ -265,74 +265,68 @@ int main(int argc, char *argv[])
 
             case GET_0:
                 retrieve_packet(file_info.fp, mock_data_packet, mock_packet_size, file_info.file_size);
+                setFrame_DATA(buf, mock_data_packet, mock_packet_size, CONTROL_FRAME_0);
+                macro_state = SEND;
+            
+            case GET_1:
+                retrieve_packet(file_info.fp, mock_data_packet, mock_packet_size, file_info.file_size);
+                setFrame_DATA(buf, mock_data_packet, mock_packet_size, CONTROL_FRAME_1);
+                macro_state = SEND;
 
             case CONFIRM_UA:
                 if (confirm_frame_UA(buf_ua) == -1){
-                    macro_state = DATA_1;
+                    macro_state = GET_0;
                 } else {
                     macro_state = SET;
                 }
                 break;
 
-            case CONFIRM_0:
-                
-            
+            case CONFIRM:
                 if (confirm_frame(buf_ua, &control_received) == -1)
-                    macro_state = SET; //ERROR IN THE FRAME RECEIVED
+                    macro_state = SEND; //ERROR IN THE FRAME RECEIVED
                 
                 if (control_received == CONTROL_RR0){
                     macro_state = GET_0;
                 } else if (control_received == CONTROL_RR1){
                     macro_state = GET_1;
-                } else if (control_received == CONTROL_REJ0){
-                    //CONTROL_REJ0: receiver rejected frame 0 and we have to send the same frame again
-                    //fseek(file_info.fp, -file_info.packet_size, SEEK_CUR); //rows back one packet
-                    //macro_state = GET_0;
-                    macro_state = SEND_0;
-                } else if (control_received == CONTROL_REJ1){
-                    //fseek(file_info.fp, -file_info.packet_size, SEEK_CUR);
-                    //macro_state = GET_1;
+                } else if (control_received == CONTROL_REJ0 || control_received == CONTROL_REJ1){
+                    macro_state = SEND;
                 }
-
                 break;
 
-            // case DATA_1:
-            //     // for(int i=0; i<mock_packet_size; i++){
-            //     //     printf("Packet[%d]: %02x\n", i, mock_data_packet);
-            //     // }
-
-            //     setFrame_DATA(buf, mock_data_packet, mock_packet_size, 0x00);
-                
-            //     printf(":%s:%d\n", buf, bytes_read);
-            //     for(int i=0;i< BUF_SIZE;i++){
-            //         printf("%02x\n",buf[i]);
-            //         if(buf[i] == 0x7E && i != 0) break;
-            //     }
+            case SEND:
+                #ifdef DEBUG
+                printf("DEBUG: macro_state SEND\n");
+                printf(":%s:%d\n", buf, bytes_read);
+                for(int i=0;i< BUF_SIZE;i++){
+                    printf("%02x\n",buf[i]);
+                    if(buf[i] == 0x7E && i != 0) break;
+                }
+                #endif
             
-            //     bytes_read = send_frame(buf, buf_ua, 3, 3, fd);
-            //     if (bytes_read <= 0){
-            //         printf("Did not receive message or message received was not as expected. Terminating code\n");
-            //         macro_state = OP_STP;
-            //     } else {
-            //         macro_state = CONFIRM_1;
-            //     }
-            //     break;
+                bytes_read = send_frame(buf, buf_ua, 3, 3, fd);
+                if (bytes_read <= 0){
+                    printf("Did not receive message or message received was not as expected. Terminating code\n");
+                    macro_state = OP_STP;
+                } else if(buf[2]==CONTROL_SET) {
+                    macro_state = CONFIRM_UA;
+                } else {
+                    macro_state = CONFIRM;
+                }
+                break;
 
             case OP_STP:
                 break;
 
             default:
+                #ifdef DEBUG
+                printf("DEBUG: macro_state default\n");
+                printf("Unexpected value for macro_state: %d\n", macrostate);
+                #endif
                 break;
+            
         }
     }
-    
-
-    // DEBUG PRINT
-    // printf(":%s:%d\n", buf_ua, bytes_read);
-    // for(int i=0;i< bytes_read;i++){
-    //     printf("%02x\n",buf_ua[i]);
-    //     if(buf_ua[i] == 0x7E && i != 0) break;
-    // }
 
     // Restore the old port settings
     if (tcsetattr(fd, TCSANOW, &oldtio) == -1)
@@ -411,6 +405,10 @@ int stuff_bytes(u_int8_t* data_packet, u_int8_t* buf, uid_t packet_size, uid_t o
             buf[offset + i + n_stuffed_bytes]= 0x7d;
             n_stuffed_bytes++;
             buf[offset + i + n_stuffed_bytes]= 0x5e;
+        } else if(data_packet[i] == 0x7d){
+            buf[offset + i + n_stuffed_bytes]= 0x7d;
+            n_stuffed_bytes++;
+            buf[offset + i + n_stuffed_bytes]= 0x5d;
         } else {
             buf[offset+ i + n_stuffed_bytes] = data_packet[i];
         }
@@ -433,6 +431,8 @@ void setFrame_SET(u_int8_t* buf){
 
 
 void setFrame_DATA(u_int8_t* buf, u_int8_t* data_packet, uid_t packet_size, u_int8_t control){
+    u_int8_t bcc2;
+    
     buf[0] = FLAG;
     buf[1] = ADDRESS_SET;
     buf[2] = control;
@@ -440,6 +440,17 @@ void setFrame_DATA(u_int8_t* buf, u_int8_t* data_packet, uid_t packet_size, u_in
     //Assemble Data Packet W/ byte stuffing
     int added_bytes = stuff_bytes(data_packet, buf, packet_size, 4); //number of bytes added by the stuffing function
     
+    bcc2 = array_xor(data_packet, packet_size, 0, packet_size-1); //BCC2
+    
+    if(bcc2 == 0x7e){
+        buf[4+packet_size+added_bytes] = 0x7d;
+        added_bytes+=1;
+        buf[4+packet_size+added_bytes] = 0x5e;
+    } else if(bcc2 == 0x7e){
+        buf[4+packet_size+added_bytes] = 0x7d;
+        added_bytes+=1;
+        buf[4+packet_size+added_bytes] = 0x5e;
+    }
     buf[4+packet_size+added_bytes] = array_xor(data_packet, packet_size, 0, packet_size-1); //BCC2
     buf[4+packet_size+added_bytes+1] = FLAG;                                              //FLAG
     #ifdef DEBUG
@@ -506,8 +517,9 @@ int confirm_frame_UA(u_int8_t* receiver_buf){
                 else if(receiver_buf[j]== FLAG){
                     read_state=FLAG_RCV;                
                 }
-                else read_state= START;
+                else {read_state= START;}
                 break;
+            
             case C_RCV:
                 if(receiver_buf[j] == (0x01 ^ 0x07)){
                     read_state = BCC_OK;

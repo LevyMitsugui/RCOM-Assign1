@@ -34,7 +34,7 @@
 #define CONTROL_SET 0x03 
 
 volatile int STOP = FALSE;
-enum STATE { START, FLAG_RCV, A_RCV, C_RCV, BCC_OK, DATA, BCC2, STP};
+enum STATE { START, FLAG_RCV, A_RCV, C_RCV, BCC_OK, DATA, BCC2, STP, SEND};
 
 int main(int argc, char *argv[])
 {
@@ -138,7 +138,7 @@ int main(int argc, char *argv[])
                 case START:
                     if(buf[j]== FLAG){
                         state= FLAG_RCV;
-                        buf_store[count]= FLAG;
+                       // buf_store[count]= FLAG;
                         count ++;
                     }
                     else{
@@ -150,7 +150,7 @@ int main(int argc, char *argv[])
                 case FLAG_RCV:
                     if(buf[j]== ADDRESS_SET){
                         state=A_RCV;
-                        buf_store[count]= ADDRESS_SET ;
+                        //buf_store[count]= ADDRESS_SET ;
                         count++;
                     }
                     else if(buf[j]== FLAG){
@@ -166,22 +166,30 @@ int main(int argc, char *argv[])
                 case A_RCV:
                     if(buf[j]== CONTROL_SET){
                         state = C_RCV;
-                        buf_store[count]= CONTROL_SET ;
+                        //buf_store[count]= CONTROL_SET ;
                         count++;
                         control=3;
                     }
                     else if(buf[j] == 0x00){
                         state = C_RCV;
-                        buf_store[count]= 0x00 ;
+                       // buf_store[count]= 0x00 ;
                         count++;
                         control=0;
+                        ctrl=CONTROL_UA;
                     }
                     else if(buf[j] == 0x40){
                         state = C_RCV;
-                        buf_store[count]= 0x40 ;
+                        //buf_store[count]= 0x40 ;
                         count++;
                         control=4;
                     }
+                    else if(buf[j]== 0x0B){
+                        state = C_RCV;
+                       // buf_store[count]= 0x0B ;
+                        count++;
+                        ctrl= CONTROL_DISC;
+                    }
+
                     else if(buf[j]== FLAG){
                         state=FLAG_RCV; 
                         count=0;               
@@ -193,16 +201,17 @@ int main(int argc, char *argv[])
                     printf("adress\n");
                     break;
                 case C_RCV:
-                    if(buf[j] == (ADDRESS_SET ^ CONTROL_SET)){
+                    if(buf[j] == (ADDRESS_SET ^ CONTROL_SET)){  /// BCC1 
+                                              
                         state = BCC_OK;
-                        buf_store[count]= (ADDRESS_SET ^ CONTROL_SET);
+                       // buf_store[count]= (ADDRESS_SET ^ CONTROL_SET);
                         count++;
                     }
                     else if(buf[j]== FLAG){
                         state=FLAG_RCV; 
                         count=0;               
                     }
-                    else{ 
+                    else{              
                         state= START;
                         count=0;
                     }
@@ -216,7 +225,7 @@ int main(int argc, char *argv[])
                     printf("BCC\n");
                     break;
                 case DATA:
-                   
+                   // BUF_STORE COMEÇA AQUI TUDO PARA TRAS ELIMINA E COUNT TAMBEM ELIMINA , MUDAR O TAMANHO DE H E K DO BCC2
                     if (buf[j]== 0x7d && buf[j+1]== 0x5e){
                         buf_store[count]=0x7e;
                         j++;
@@ -240,21 +249,53 @@ int main(int argc, char *argv[])
                        
                     }
                     if(bcc2==buf_store[count-1]){ //caso bcc2 esteja igual ao penultimo elemento do bufferstore avança para stop pois já deu store da flag 
-                        state=STP;
+                       
+                        if( control== 0){
+                            ctrl=CONTROL_RR1;
+                        }
+                        else if( control == 4){
+                            ctrl=CONTROL_RR0;
+                        }
+                        state=SEND;
                     }
-                  //   else CONTROL_REJ1
+                    else {
+                       if(control==0){
+                            ctrl=CONTROL_REJ0;
+                            for(int k=(count-2);h>(count-dat);h--){
+                                buf_store[k]={"/0"};
+                            }
+                        }
+                        if else(control==4){
+                            ctrl=CONTROL_REJ1;
+                        }
+                    }
                     
                     break;
                 case STP:
                     printf("stop\n");
                     //STOP = TRUE ;
                     break;
+                case SEND:
+                    
+                    //printf("CORRECT\n");
+                    buf_ua[0] = FLAG;              //
+                    buf_ua[1] = ADDRESS_UA;           //
+                    buf_ua[2] = ctrl;           //
+                    buf_ua[3] = ADDRESS_UA ^ buf_ua[2]; //
+                    //buf[3] = ADDRESS + TEST;
+                    buf_ua[4] = FLAG;
 
+                    int bytes = write(fd, buf_ua, BUF_SIZE);
+                    printf("%d bytes written\n", bytes);
+                    sleep(1);
+                    state = START;
+                    break;
             }	
-            if(STOP==TRUE) break;
+            
+           if(STOP==TRUE) break;
 
         }
-        if(state == STP){
+        /*if(state == STP){
 	        printf("CORRECT\n");
             buf_ua[0] = FLAG;              //
             buf_ua[1] = ADDRESS_UA;           //
@@ -267,7 +308,7 @@ int main(int argc, char *argv[])
             printf("%d bytes written\n", bytes);
             sleep(1);
             state = START;
-        } 
+        } */
 
     }
 
