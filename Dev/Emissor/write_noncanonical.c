@@ -20,8 +20,11 @@
 #define FALSE 0
 #define TRUE 1
 
+#define TIMEOUT 2
+#define MAX_ATTEMPTS 3
+
 #define BUF_SIZE 32 //256
-#define PACKET_SIZE 11//BUF_SIZE-6
+#define PACKET_SIZE BUF_SIZE-6
 
 #define FLAG            0x7E
 #define ADDRESS_SET     0x03
@@ -41,10 +44,11 @@
 #define FILE_NAME "penguin.gif"
 
 //#define DEBUG
+//#define BYPASS
 
 volatile int STOP = FALSE;
 
-enum OP_STATE {SET, CONFIRM_UA, GET_0, GET_1, CONFIRM, SEND, OP_STP};
+enum OP_STATE {SET, CONFIRM_UA, GET_0, GET_1, DISC,CONFIRM, SEND, OP_STP};
 enum READ_STATE { START, FLAG_RCV, A_RCV, C_RCV, BCC_OK , STP};
 
 int alarmEnabled = FALSE;
@@ -129,6 +133,8 @@ void setFrame_SET(u_int8_t* buf);
  */
 void setFrame_DATA(u_int8_t* buf, u_int8_t* data_packet, uid_t packet_size, u_int8_t control);
 
+void setFrame_DISC(u_int8_t* buf);
+
 /**
  * @brief State Machine that Processes responses from receiver.
  * 
@@ -143,6 +149,10 @@ int confirm_frame_UA(u_int8_t* receiver_buf);
 long get_file_size(FILE* file_pointer);
 int retrieve_packet(FILE* file_pointer, u_int8_t* packet_array, uid_t packet_size, long file_size);
 
+int llopen(const char *port, int role);
+int llread(int fd, u_int8_t* buf, int length);
+int llwrite(int fd, const u_int8_t* buf, int length);
+int llclose(int fd);
 
 int main(int argc, char *argv[]){
     (void)signal(SIGALRM, alarmHandler);
@@ -215,9 +225,9 @@ int main(int argc, char *argv[]){
     macro_state = SET;
 
     unsigned char buf[BUF_SIZE] = {0};
-    unsigned char packet_0[BUF_SIZE] = {0};
-    unsigned char packet_1[BUF_SIZE] = {0};
-    unsigned char buf_ua[BUF_SIZE + 1] = {0};
+    unsigned char buf_receiver[BUF_SIZE + 1] = {0};
+
+    int retriever_status=0;
     
     struct FILE_INFO file_info;
     file_info.fp = fopen(FILE_NAME, "rb");
@@ -233,65 +243,43 @@ int main(int argc, char *argv[]){
     file_info.file_size = get_file_size(file_info.fp);
     file_info.packet_size = PACKET_SIZE;
     file_info.n_packets = (int) file_info.file_size/file_info.packet_size;
-    file_info.current_packet = 0;
   
 
     // u_int8_t mock_data_packet[] = {0x1e, 0x23, 0x7e, 0x5e, 0x7e, 0xa2, 0x12, 0x24, 0x7e, 0x59, 0x42};
     // u_int8_t mock_data_packet[] = {0x47, 0x49, 0x46, 0x38, 0x39, 0x61, 0x01, 0x01, 0x2f, 0x01, 0xf5};
     // uid_t mock_packet_size = 11;
-    u_int8_t mock_data_packet[PACKET_SIZE] = {0};
-    uid_t mock_packet_size = PACKET_SIZE;
-    retrieve_packet(file_info.fp, mock_data_packet, mock_packet_size, file_info.file_size);
-    for(int i=0; i<mock_packet_size; i++){
-        printf("from retrieve Packet[%d]: %02x\n", i, mock_data_packet[i]);
-    }
+    u_int8_t data_packet[PACKET_SIZE] = {0};
+    uid_t packet_size = PACKET_SIZE;
+    // retrieve_packet(file_info.fp, data_packet, packet_size, file_info.file_size);
+    // for(int i=0; i<packet_size; i++){
+    //     printf("from retrieve Packet[%d]: %02x\n", i, data_packet[i]);
+    // }
 
     int bytes_read = 0;
     u_int8_t control_received = 0;
 
-    for(int i = 0; i<3; i++){
+    while(STOP == FALSE){
         switch (macro_state){
             case SET:
                 setFrame_SET(buf);
-                bytes_read = send_frame(buf, buf_ua, 3, 3, fd);
-                if (bytes_read <= 0){
-                    printf("Did not receive message or message received was not as expected. Terminating code\n");
-                    macro_state = OP_STP; 
-                    //macro_state = CONFIRM;
-                } else {
-                    macro_state = CONFIRM_UA;
-                }
+                macro_state = SEND;
                 break;
 
             case GET_0:
-                retrieve_packet(file_info.fp, mock_data_packet, mock_packet_size, file_info.file_size);
-                setFrame_DATA(buf, mock_data_packet, mock_packet_size, CONTROL_FRAME_0);
+                retriever_status = retrieve_packet(file_info.fp, data_packet, packet_size, file_info.file_size);
+                setFrame_DATA(buf, data_packet, packet_size, CONTROL_FRAME_0);
                 macro_state = SEND;
+                break;
             
             case GET_1:
-                retrieve_packet(file_info.fp, mock_data_packet, mock_packet_size, file_info.file_size);
-                setFrame_DATA(buf, mock_data_packet, mock_packet_size, CONTROL_FRAME_1);
+                retriever_status = retrieve_packet(file_info.fp, data_packet, packet_size, file_info.file_size);
+                setFrame_DATA(buf, data_packet, packet_size, CONTROL_FRAME_1);
                 macro_state = SEND;
-
-            case CONFIRM_UA:
-                if (confirm_frame_UA(buf_ua) == -1){
-                    macro_state = GET_0;
-                } else {
-                    macro_state = SET;
-                }
                 break;
 
-            case CONFIRM:
-                if (confirm_frame(buf_ua, &control_received) == -1)
-                    macro_state = SEND; //ERROR IN THE FRAME RECEIVED
-                
-                if (control_received == CONTROL_RR0){
-                    macro_state = GET_0;
-                } else if (control_received == CONTROL_RR1){
-                    macro_state = GET_1;
-                } else if (control_received == CONTROL_REJ0 || control_received == CONTROL_REJ1){
-                    macro_state = SEND;
-                }
+            case DISC:
+                setFrame_DISC(buf);
+                macro_state = SEND;
                 break;
 
             case SEND:
@@ -304,10 +292,18 @@ int main(int argc, char *argv[]){
                 }
                 #endif
             
-                bytes_read = send_frame(buf, buf_ua, 3, 3, fd);
+                bytes_read = send_frame(buf, buf_receiver, MAX_ATTEMPTS, TIMEOUT, fd);
+
+                #ifdef DEBUG
+                printf("DEBUG: bytes_read: %d\n", bytes_read);	
+                #endif
+                
                 if (bytes_read <= 0){
-                    printf("Did not receive message or message received was not as expected. Terminating code\n");
+                    printf("Did not receive message after %d attempts. Terminating code\n", MAX_ATTEMPTS);
                     macro_state = OP_STP;
+                    #ifdef BYPASS
+                    macro_state = CONFIRM_UA;
+                    #endif
                 } else if(buf[2]==CONTROL_SET) {
                     macro_state = CONFIRM_UA;
                 } else {
@@ -315,13 +311,42 @@ int main(int argc, char *argv[]){
                 }
                 break;
 
+            case CONFIRM_UA:
+                macro_state = (confirm_frame_UA(buf_receiver) == -1) ? SET : GET_0;
+                break;
+
+            case CONFIRM:
+                if (confirm_frame(buf_receiver, &control_received) == -1){
+                    macro_state = SEND; //ERROR IN THE FRAME RECEIVED, TRYING AGAIN
+                } else if((control_received == CONTROL_RR0 || control_received == CONTROL_RR1) && retriever_status == 0){
+                    macro_state = DISC;
+                } else if (control_received == CONTROL_RR0){
+                    macro_state = GET_0;
+                } else if (control_received == CONTROL_RR1){
+                    macro_state = GET_1;
+                } else if (control_received == CONTROL_REJ0 || control_received == CONTROL_REJ1){
+                    macro_state = SEND;
+                } else if (control_received == CONTROL_DISC){
+                    macro_state = OP_STP;
+                }
+
+                #ifdef BYPASS
+                macro_state = GET_0;
+                #endif
+
+                break;
+
             case OP_STP:
+                #ifdef DEBUG
+                printf("DEBUG: macro_state OP_STP\n");
+                #endif
+                STOP = TRUE;
                 break;
 
             default:
                 #ifdef DEBUG
                 printf("DEBUG: macro_state default\n");
-                printf("Unexpected value for macro_state: %d\n", macrostate);
+                printf("Unexpected value for macro_state: %d\n", macro_state);
                 #endif
                 break;
             
@@ -334,12 +359,10 @@ int main(int argc, char *argv[]){
         perror("tcsetattr");
         exit(-1);
     }
-
     close(fd);
 
     return 0;
 }
-
 
 u_int8_t byte_xor(u_int8_t byte1, u_int8_t byte2){
     return byte1^byte2;
@@ -362,6 +385,10 @@ u_int8_t array_xor(u_int8_t* array, int arr_size, uid_t init_index, uid_t final_
     return ret_xor;
 }
 
+// int send(int fd, u_int8_t* frame, int frame_size){
+    
+// }
+
 int send_frame(u_int8_t*sender_buf, u_int8_t* receiver_buf, uid_t attempts, uid_t timeout, int fd){
 
     int bytes = 0;
@@ -370,25 +397,14 @@ int send_frame(u_int8_t*sender_buf, u_int8_t* receiver_buf, uid_t attempts, uid_
     while (alarmCount < attempts){
         if (alarmEnabled == FALSE){
             bytes = write(fd, sender_buf, BUF_SIZE);
-            alarm(3); // Set alarm to be triggered in 3s
+            alarm(timeout);
             alarmEnabled = TRUE;
         }
         bytes_read = read(fd, receiver_buf, BUF_SIZE);
         receiver_buf[bytes_read] = '\0'; // Set end of string to '\0', so we can printf
 
-        if(bytes_read != 0){
-            alarm(0);
-            if (receiver_buf[1] == 0x01)
-                if ((receiver_buf[1] ^ receiver_buf[2]) == receiver_buf[3]) {
-                    #ifdef DEBUG
-                    printf("BCC1 ok\n");
-                    #endif
-                } else { 
-                    printf("BCC1 error\n");
-                    return -1;
-                }
+        if(bytes_read != 0)
             break;
-        }
     }
     alarm(0);
     alarmEnabled = FALSE;
@@ -429,6 +445,13 @@ void setFrame_SET(u_int8_t* buf){
     buf[4] = FLAG;
 } 
 
+void setFrame_DISC(u_int8_t* buf){
+    buf[0] = FLAG;
+    buf[1] = ADDRESS_SET;
+    buf[2] = CONTROL_DISC;
+    buf[3] = byte_xor(buf[1], buf[2]); 
+    buf[4] = FLAG;
+}
 
 void setFrame_DATA(u_int8_t* buf, u_int8_t* data_packet, uid_t packet_size, u_int8_t control){
     u_int8_t bcc2;
@@ -446,12 +469,12 @@ void setFrame_DATA(u_int8_t* buf, u_int8_t* data_packet, uid_t packet_size, u_in
         buf[4+packet_size+added_bytes] = 0x7d;
         added_bytes+=1;
         buf[4+packet_size+added_bytes] = 0x5e;
-    } else if(bcc2 == 0x7e){
+    } else if(bcc2 == 0x7d){
         buf[4+packet_size+added_bytes] = 0x7d;
         added_bytes+=1;
-        buf[4+packet_size+added_bytes] = 0x5e;
+        buf[4+packet_size+added_bytes] = 0x5d;
     }
-    buf[4+packet_size+added_bytes] = array_xor(data_packet, packet_size, 0, packet_size-1); //BCC2
+    buf[4+packet_size+added_bytes] = bcc2; //BCC2
     buf[4+packet_size+added_bytes+1] = FLAG;                                              //FLAG
     #ifdef DEBUG
     printf("DEBUG: setFrame_DATA\n");
@@ -479,6 +502,7 @@ int retrieve_packet(FILE* file_pointer, u_int8_t* packet_array, uid_t packet_siz
         for(int i=remainder_bytes; i<packet_size;i++){
             packet_array[i] = 0;
         }
+        return 0;
     } else {
         fread(packet_array, 1, packet_size, file_pointer);
     }
@@ -488,6 +512,68 @@ int retrieve_packet(FILE* file_pointer, u_int8_t* packet_array, uid_t packet_siz
     // }
     return 1;
 } 
+
+struct applicationLayer {
+    int fileDescriptor; /*Serial port descriptor*/
+    int status; /*TRANSMITTER | RECEIVER*/
+};
+struct linkLayer {
+    char port[20]; /*Device /dev/ttySx, x = 0, 1*/
+    int baudRate; /*Speed of the transmission*/
+    unsigned int sequenceNumber; /*Frame sequence number: 0, 1*/
+    unsigned int timeout; /*Timer value: 1 s*/
+    unsigned int numTransmissions; /*Number of retries in case of
+    failure*/
+    char frame[BUF_SIZE]; /*Frame*/
+};
+
+int llopen(const char *port, int role){
+    struct applicationLayer* al = malloc(sizeof(struct applicationLayer));
+    if (al == NULL) return -1;
+    struct linkLayer* ll = malloc(sizeof(struct linkLayer));
+    if (ll == NULL) return -1;
+
+    strncpy(ll->port, port, 20);
+    al->fileDescriptor = open(port, O_RDWR | O_NOCTTY);
+    al->status = role;
+
+    if (al->fileDescriptor < 0)
+    {
+        perror(ll->port);
+        exit(-1);
+    }
+
+    struct termios oldtio;
+    struct termios newtio;
+
+    if (tcgetattr(al->fileDescriptor, &oldtio) == -1)
+    {
+        perror("tcgetattr");
+        exit(-1);
+    }
+
+    memset(&newtio, 0, sizeof(newtio));
+
+    newtio.c_cflag = BAUDRATE | CS8 | CLOCAL | CREAD;
+    newtio.c_iflag = IGNPAR;
+    newtio.c_oflag = 0;
+
+    // Set input mode (non-canonical, no echo,...)
+    newtio.c_lflag = 0;
+    newtio.c_cc[VMIN] = 0;  // Blocking read until 5 chars received
+    newtio.c_cc[VTIME] = 5; // Inter-character timer unused
+
+    tcflush(al->fileDescriptor, TCIOFLUSH);
+
+    // Set new port settings
+    if (tcsetattr(al->fileDescriptor, TCSANOW, &newtio) == -1)
+    {
+        perror("tcsetattr");
+        exit(-1);
+    }
+
+    setFrame_SET(ll->frame);
+}
 
 int confirm_frame_UA(u_int8_t* receiver_buf){
     enum READ_STATE read_state;
