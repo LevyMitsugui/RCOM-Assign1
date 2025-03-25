@@ -6,7 +6,8 @@
 enum READ_STATE { START, FLAG_RCV, A_RCV, C_RCV, BCC_OK , STP};
 
 //typedef struct linkLayer linkLayer;
-linkLayer ll;
+//linkLayer ll;
+
 struct termios oldtio;
 struct termios newtio;
 
@@ -22,6 +23,17 @@ void reset_alarm(void){
     alarm(0);
     alarmEnabled = FALSE;
     alarmCount = 0; 
+}
+
+linkLayer create_link_layer(const char *port, int baudRate, uid_t timeout, uid_t numTransmissions){
+    linkLayer ll;
+    strncpy(ll.port, port, 20);
+    ll.baudRate = BAUDRATE;
+    ll.timeout = timeout;
+    ll.numTransmissions = numTransmissions;
+
+    ll.sequenceNumber = 0;
+    return ll;
 }
 
 int llopen(const char *port, int role){
@@ -47,7 +59,7 @@ int llopen(const char *port, int role){
 
     memset(&newtio, 0, sizeof(newtio));
 
-    newtio.c_cflag = BAUDRATE | CS8 | CLOCAL | CREAD;
+    newtio.c_cflag = ll.baudRate | CS8 | CLOCAL | CREAD;
     newtio.c_iflag = IGNPAR;
     newtio.c_oflag = 0;
 
@@ -74,11 +86,11 @@ int llopen(const char *port, int role){
         setFrame_SET(buf);
         int bytes = 0;
         
-        while(alarmCount < MAX_TRANSMISSION_ATTEMPTS){
+        while(alarmCount < ll.numTransmissions){
             if (alarmEnabled == FALSE){
                 bytes = write(fd, buf, BUF_SIZE);
                 alarmEnabled = TRUE;
-                alarm(TRANSMIT_TIMEOUT);
+                alarm(ll.timeout);
             }
             bytes = read(fd, buf, BUF_SIZE);
             if (bytes > 0){
@@ -133,7 +145,6 @@ int llread(int fd, u_int8_t* buf, int length){
 
  int llwrite(int fd, const u_int8_t* buf, int length){
     int bytes = write(fd, buf, BUF_SIZE);
-    printf("%d bytes written\n", bytes);
     if (bytes < 0)
     {
         perror("write");
@@ -167,6 +178,14 @@ void setFrame_UA(u_int8_t* buf){
     buf[1] = ADDRESS_EMIT;
     buf[2] = CONTROL_UA;
     buf[3] = buf[1]^buf[2]; 
+    buf[4] = FLAG;
+}
+
+void setFrame_DISC(u_int8_t* buf){
+    buf[0] = FLAG;
+    buf[1] = ADDRESS_RECV;
+    buf[2] = CONTROL_DISC;
+    buf[3] = byte_xor(buf[1], buf[2]); 
     buf[4] = FLAG;
 }
 

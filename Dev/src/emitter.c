@@ -6,6 +6,8 @@ struct applicationLayer {
     int status; /*TRANSMITTER | RECEIVER*/
 } al;
 
+linkLayer ll;
+
 int main(int argc, char *argv[]){
     if (argc < 2)
     {
@@ -13,8 +15,9 @@ int main(int argc, char *argv[]){
     }
     int written_bytes = 0;
 
+    ll = create_link_layer(argv[1], BAUDRATE, TRANSMIT_TIMEOUT, MAX_TRANSMISSION_ATTEMPTS);
+
     al.fileDescriptor = llopen(argv[1], TRANSMITTER);
-    printf("file Descriptor: %d\n", al.fileDescriptor);
     written_bytes = llwrite(al.fileDescriptor, "abcdefghij", 11);
     printf("%d bytes written\n", written_bytes);
     llclose(al.fileDescriptor);

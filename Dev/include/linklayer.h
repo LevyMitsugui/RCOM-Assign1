@@ -50,6 +50,8 @@ typedef struct{
 
 extern linkLayer ll;
 
+linkLayer create_link_layer(const char *port, int baudRate, uid_t timeout, uid_t numTransmissions);
+
 int llopen(const char *port, int role);
 
 int llread(int fd, u_int8_t* buf, int length);
@@ -61,6 +63,8 @@ int llclose(int fd);
 void setFrame_SET(u_int8_t* buf);
 
 void setFrame_UA(u_int8_t* buf);
+
+void setFrame_DISC(u_int8_t* buf);
 
 int confirm_frame_control(u_int8_t* receiver_buf, u_int8_t control);
 
