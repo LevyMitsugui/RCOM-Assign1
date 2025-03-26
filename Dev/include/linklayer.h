@@ -18,12 +18,13 @@
 #define RECEIVER 1
 #define BAUDRATE B38400
 #define RECEIVE_TIMEOUT 30 // in seconds
-#define TRANSMIT_TIMEOUT 2
-#define MAX_TRANSMISSION_ATTEMPTS 3
+#define TRANSMIT_TIMEOUT 1
+#define MAX_TRANSMISSION_ATTEMPTS 15
 
 #define BUF_SIZE 32 //256
+#define HEADER_SIZE 4
 
-#define FLAG            0x7e
+#define FLAG            0x7E
 #define ADDRESS_RECV     0x03
 #define CONTROL_SET     0x03 
 
@@ -41,6 +42,7 @@
 typedef struct{
     char port[20]; /*Device /dev/ttySx, x = 0, 1*/
     int baudRate; /*Speed of the transmission*/
+    int status; /*TRANSMITTER | RECEIVER*/
     unsigned int sequenceNumber; /*Frame sequence number: 0, 1*/
     unsigned int timeout; /*Timer value: 1 s*/
     unsigned int numTransmissions; /*Number of retries in case of
@@ -60,11 +62,15 @@ int llwrite(int fd, const u_int8_t* buf, int length);
 
 int llclose(int fd);
 
+int send_frame(u_int8_t*sender_buf, u_int8_t* receiver_buf, uid_t attempts, uid_t timeout, int fd);
+
 void setFrame_SET(u_int8_t* buf);
 
 void setFrame_UA(u_int8_t* buf);
 
 void setFrame_DISC(u_int8_t* buf);
+
+int confirm_header(u_int8_t* receiver_buf);
 
 int confirm_frame_control(u_int8_t* receiver_buf, u_int8_t control);
 

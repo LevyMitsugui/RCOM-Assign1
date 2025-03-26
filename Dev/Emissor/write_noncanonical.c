@@ -154,6 +154,7 @@ int llread(int fd, u_int8_t* buf, int length);
 int llwrite(int fd, const u_int8_t* buf, int length);
 int llclose(int fd);
 
+
 int main(int argc, char *argv[]){
     (void)signal(SIGALRM, alarmHandler);
     // Program usage: Uses either COM1 or COM2

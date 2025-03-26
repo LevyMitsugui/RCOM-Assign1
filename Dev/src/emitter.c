@@ -20,6 +20,7 @@ int main(int argc, char *argv[]){
     al.fileDescriptor = llopen(argv[1], TRANSMITTER);
     written_bytes = llwrite(al.fileDescriptor, "abcdefghij", 11);
     printf("%d bytes written\n", written_bytes);
+
     llclose(al.fileDescriptor);
 
     return 0;
