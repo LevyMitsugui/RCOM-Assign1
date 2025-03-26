@@ -17,8 +17,11 @@ int main(int argc, char *argv[]){
 
     ll = create_link_layer(argv[1], BAUDRATE, TRANSMIT_TIMEOUT, MAX_TRANSMISSION_ATTEMPTS);
 
+    u_int8_t buf[BUF_SIZE] = {0};
+    setFrame_MOCK1(buf);
+
     al.fileDescriptor = llopen(argv[1], TRANSMITTER);
-    written_bytes = llwrite(al.fileDescriptor, "abcdefghij", 11);
+    written_bytes = llwrite(al.fileDescriptor, buf, BUF_SIZE);
     printf("%d bytes written\n", written_bytes);
 
     llclose(al.fileDescriptor);

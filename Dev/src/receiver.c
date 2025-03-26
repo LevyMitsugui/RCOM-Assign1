@@ -16,6 +16,10 @@ int main(int argc, char *argv[]){
     ll = create_link_layer(argv[1], BAUDRATE, TRANSMIT_TIMEOUT, MAX_TRANSMISSION_ATTEMPTS);
 
     al.fileDescriptor = llopen(argv[1], RECEIVER);
+    if(al.fileDescriptor < 0){
+        printf("Error opening serial port\n");
+        return -1;
+    }
     
     u_int8_t incoming_bytes[BUF_SIZE] = {0};
     llread(al.fileDescriptor, incoming_bytes, BUF_SIZE);
