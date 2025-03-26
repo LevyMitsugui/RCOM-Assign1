@@ -12,6 +12,7 @@
 #include <termios.h>
 #include <unistd.h>
 #include <time.h>
+#include "linklayer.c"
 
 // Baudrate settings are defined in <asm/termbits.h>, which is
 // included by <termios.h>
@@ -139,11 +140,11 @@ int main(int argc, char *argv[])
                     if(buf[j]== FLAG){
                         state= FLAG_RCV;
                        // buf_store[count]= FLAG;
-                        count ++;
+                        //count ++;
                     }
                     else{
                         state=START;
-                        count=0; 
+                       // count=0; 
                     }
                     printf("start\n");
                     break;
@@ -151,15 +152,15 @@ int main(int argc, char *argv[])
                     if(buf[j]== ADDRESS_SET){
                         state=A_RCV;
                         //buf_store[count]= ADDRESS_SET ;
-                        count++;
+                        //count++;
                     }
                     else if(buf[j]== FLAG){
                         state=FLAG_RCV;
-                        count=0;                
+                        //count=0;                
                     }
                     else {
                         state= START;
-                        count=0; 
+                        //count=0; 
                     }
                     printf("flag\n");
                     break;
@@ -167,36 +168,36 @@ int main(int argc, char *argv[])
                     if(buf[j]== CONTROL_SET){
                         state = C_RCV;
                         //buf_store[count]= CONTROL_SET ;
-                        count++;
+                        //count++;
                         control=3;
                     }
                     else if(buf[j] == 0x00){
                         state = C_RCV;
                        // buf_store[count]= 0x00 ;
-                        count++;
+                        //count++;
                         control=0;
                         ctrl=CONTROL_UA;
                     }
                     else if(buf[j] == 0x40){
                         state = C_RCV;
                         //buf_store[count]= 0x40 ;
-                        count++;
+                        //count++;
                         control=4;
                     }
                     else if(buf[j]== 0x0B){
                         state = C_RCV;
                        // buf_store[count]= 0x0B ;
-                        count++;
+                        //count++;
                         ctrl= CONTROL_DISC;
                     }
 
                     else if(buf[j]== FLAG){
                         state=FLAG_RCV; 
-                        count=0;               
+                        //count=0;               
                     }
                     else{
                         state= START;
-                        count=0;
+                        //count=0;
                     }
                     printf("adress\n");
                     break;
@@ -204,16 +205,15 @@ int main(int argc, char *argv[])
                     if(buf[j] == (ADDRESS_SET ^ CONTROL_SET)){  /// BCC1 
                                               
                         state = BCC_OK;
-                       // buf_store[count]= (ADDRESS_SET ^ CONTROL_SET);
-                        count++;
+                       
                     }
                     else if(buf[j]== FLAG){
                         state=FLAG_RCV; 
-                        count=0;               
+                                       
                     }
                     else{              
                         state= START;
-                        count=0;
+                        
                     }
                     printf("control\n");
                     break;

@@ -3,7 +3,7 @@
 #define DEBUG 
 
 
-enum READ_STATE { START, FLAG_RCV, A_RCV, C_RCV, BCC_OK , STP};
+enum READ_STATE { START, FLAG_RCV, A_RCV, C_RCV, BCC_OK, BCC2 , DATA , SEND ,STP};
 
 //typedef struct linkLayer linkLayer;
 //linkLayer ll;
@@ -130,9 +130,12 @@ int llopen(const char *port, int role){
 
 int llread(int fd, u_int8_t* buf, int length){
     (void)signal(SIGALRM, alarmHandler);
-    u_int8_t buf_receive[BUF_SIZE] = {0};
-    u_int8_t buf_send[BUF_SIZE] = {0};
-
+    u_int8_t buf_receive[BUF_SIZE] = {0}; // tudo 
+    u_int8_t buf_send[BUF_SIZE] = {0};  // montar um frame 
+                                        // buf serve para a data 
+    u_int8_t buf_aux[BUF_SIZE] = {0};      // buf auxiliar          
+    int count=0;
+    int siz=0;
     int bytes_read = read(fd, buf_receive, BUF_SIZE);
     if(bytes_read < 0) return -1;
     #ifdef DEBUG
@@ -142,7 +145,201 @@ int llread(int fd, u_int8_t* buf, int length){
     u_int8_t ctrl_recv = confirm_header(buf_receive);
     if(ctrl_recv == -1) return -1;
     
-    
+    for(int j=0; j< BUF_SIZE;j++){
+        switch(READ_STATE){
+            case START:
+                if(buf_receive[j]== FLAG){
+                    state= FLAG_RCV;
+                    //buf_receive[count]= FLAG;
+                    count ++;
+                }
+                else{
+                    state=START;
+                    count=0; 
+                }
+                printf("start\n");
+                break;
+            case FLAG_RCV:
+                if(buf_receive[j]== ADDRESS_SET){
+                    state=A_RCV;
+                    //buf_receive[count]= ADDRESS_SET ;
+                    count++;
+                }
+                else if(buf_receive[j]== FLAG){
+                    state=FLAG_RCV;
+                    count=1; //                
+                }
+                else {
+                    state= START;
+                    count=0; 
+                }
+                printf("flag\n");
+                break;
+            case A_RCV:
+                if(buf_receive[j] == 0x00){
+                    state = C_RCV;
+                   // buf_receive[count]= 0x00 ;
+                    count++;
+                    control=0;
+                  /* if(ll.sequenceNumber==0){
+                        ctrl=CONTROL_RR1;
+                        state=send;
+                   }
+                   else if(ll.sequenceNumber==1){
+                        ctrl=CONTROL_RR0;
+                   }*/
+                }
+                else if(buf_receive[j] == 0x40){
+                    state = C_RCV;
+                    //buf_receive[count]= 0x40 ;
+                    count++;
+                    control=4;
+                }
+               /* else if(buf_receive[j]== 0x0B){
+                    state = C_RCV;
+                    //buf_receive[count]= 0x0B ;
+                    count++;
+                    ctrl= CONTROL_DISC;
+                    control=0x0B;
+                }*/
+
+                else if(buf_recieve[j]== FLAG){
+                    state=FLAG_RCV; 
+                    count=0;               
+                }
+                
+                else{
+                    state= START;
+                    count=0;
+                }
+                printf("adress\n");
+                break;
+            case C_RCV: 
+                if(buf_receive[j] == (ADDRESS_SET ^ control)){  /// BCC1 
+                    //buf_receive[count]= (ADDRESS_SET ^ control) ;
+                    count++;                   
+                    state = BCC_OK;
+                   
+                }
+                else if(buf_receive[j]== FLAG){
+                    state=FLAG_RCV; 
+                    count=0;       
+                }
+                else{              
+                    state= START;
+                    count=0;
+                }
+                printf("control\n");
+                break;
+            case BCC_OK:
+                /*
+                if it is a duplicate frame (Ns is not the expected) 
+                » the data field is discarded 
+                » a response RR(expected Ns) is sent 
+                
+                */
+                
+                if( control == 0 || control == 4){ // espera de N
+                    state= DATA; 
+
+                }
+                //else if (control == disc)
+                else state= START;
+                printf("BCC\n");
+                break;
+            case DATA:
+              
+                if (buf_receive[j]== 0x7d && buf_receive[j+1]== 0x5e){
+                  //  buf_receive[count]=0x7e;   mudar daqui para baixo 
+                    j++;
+                    count++;
+                   // dat+=1;
+                    buf_aux[siz]=0x7e;
+                    siz+=1;
+                }
+                else if (buf[j]== 0x7d && buf[j+1]== 0x5d){
+                    buf_receive[count]=0x7d;
+                    j++;
+                    count++;
+                    //dat+=1;
+                    buf_aux[siz]=0x7d;
+                    siz+=1;
+                }
+                else {
+                    buf_receive[count]=buf[j];
+                    count++;
+                    //dat+=1;
+                    buf_aux[siz]=buf[j];
+                    siz+=1;
+                }
+                if(buf[j]==0x7E){
+                    buf_receive[count]=buf[j]; // está a guardar tudo 
+                    buf_aux[siz]=buf[j]; // guarda só a data 
+                    siz+=1;
+                    state= BCC2;
+                }
+                bcc2=buf_aux[0];
+                break;
+            case BCC2:  
+                for (int h=1;h<siz-2;h++ ){ // pega no segundo de data até ao buf -flag -bcc2 e faz xor e guarda em bcc2
+                   bcc2 = (bcc2 ^ buf_aux[h]);    
+                   
+                }
+                if(bcc2==buf_receive[siz-1]){ //caso bcc2 esteja igual ao penultimo elemento do bufferstore avança para stop pois já deu store da flag 
+                   
+                    if( control== 0){
+                        ctrl=CONTROL_RR1;
+                        //the data field is passed to the Application layer 
+                    }
+                    else if( control == 4){
+                        ctrl=CONTROL_RR0;
+                       //the data field is passed to the Application layer 
+                    }
+                    state=SEND;
+                }
+                else {
+                   if(control==0){
+                        ctrl=CONTROL_REJ0;
+                        buf_aux[siz]={0};  // foi rejeitado dá reset a frame e a data 
+                        buf_receive[count]={0};
+                        siz=0;
+                        count=0;
+                    }
+                    if else(control==4){
+                        ctrl=CONTROL_REJ1;
+                        buf_aux[siz]={0}; 
+                        buf_receive[count]={0};
+                        siz=0;
+                        count=0;
+                    }
+                }
+                
+                break;
+            case STP:
+                
+                printf("stop\n");
+                //STOP = TRUE ;
+                break;
+            case SEND:
+                
+                //printf("CORRECT\n");
+                buf_ua[0] = FLAG;              //
+                buf_ua[1] = ADDRESS_UA;           //
+                buf_ua[2] = ctrl;           //
+                buf_ua[3] = ADDRESS_UA ^ buf_ua[2]; //
+                //buf[3] = ADDRESS + TEST;
+                buf_ua[4] = FLAG;
+
+                int bytes = write(fd, buf_ua, BUF_SIZE);
+                printf("%d bytes written\n", bytes);
+                sleep(1);
+                state = START;
+                break;
+        }	
+        
+       if(STOP==TRUE) break;
+
+    }
 
 
     return bytes_read;
