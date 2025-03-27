@@ -276,7 +276,16 @@ int llread(int fd, u_int8_t* buf, int length){
 
             
             case DESTUFF:
+                printf("Message length = %d\n", message_length);
+                if(message_length < 1) {    
+                    printf("Invalid frame Data\n");
+                    state = RESPOND;
+                    break;
+                }
                 ret_data_length = destuff_bytes(buf_receive, buf, 4, message_length-1); //destuff up two the bcc2 byte
+                if(ret_data_length == -1){
+                    printf("something went worng in state DESTUFF\n");
+                }
                 bcc2 = buf[ret_data_length];
                 buf[ret_data_length] = 0;
 
@@ -613,7 +622,7 @@ u_int8_t array_xor(u_int8_t* array, int arr_size, uid_t init_index, uid_t final_
     printf("DEBUG: array_xor\n");
     #endif
 
-    printf("final_index: %d, BUF_SIZE: %d\n", final_index, BUF_SIZE);
+    //printf("final_index: %d, BUF_SIZE: %d\n", final_index, BUF_SIZE); // TODO remove this later
     if(final_index >= BUF_SIZE){
         printf("array_xor: Index out of bounds\n"); return 0;
     }

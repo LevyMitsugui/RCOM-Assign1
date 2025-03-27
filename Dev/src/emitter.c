@@ -1,6 +1,6 @@
 #include "linklayer.h"
 
-#define PACK_SIZE 16
+#define PACK_SIZE 32
 #define FILE_NAME "/mnt/c/Users/Levy/Documents/GitHub/RCOM-Assign1/Dev/src/penguin.gif"
 //#define FILE_NAME "C:/Users/Levy/Documents/GitHub/RCOM-Assign1/Dev/src/penguin.gif"
 #define PORT "/dev/pts/4"
