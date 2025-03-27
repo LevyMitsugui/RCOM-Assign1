@@ -1,10 +1,19 @@
 #include "linklayer.h"
 
-#define DEBUG 
+// #define DEBUG 
+// #define DEBUG_llopen
+// #define DEBUG_llclose
+// #define DEBUG_send_frame
+//#define DEBUG_setFrame_DATA
+//#define DEBUG_array_xor
+//#define DEBUG_stuff_bytes
+//#define DEBUG_destuff_bytes
+//#define DEBUG_llread
+// #define DEBUG_llwrite
 
 
 enum READ_STATE { START, FLAG_RCV, A_RCV, C_RCV, BCC_OK, BCC2 , DATA , SEND ,STP};
-
+enum llread_state {READ, CONF_HEADER, DESTUFF, CONF_DATA, RESPOND, FINISH_READ};
 //typedef struct linkLayer linkLayer;
 //linkLayer ll;
 
@@ -90,50 +99,100 @@ int llopen(const char *port, int role){
         int bytes = 0;
         
         bytes = send_frame(buf, buf_receive, ll.numTransmissions, ll.timeout, fd);
-        printf("%d bytes read\n", bytes);
         
+        #ifdef DEBUG_llopen
+        printf("Response from receiver:\n");        
         for (int i = 0; i < bytes; i++){
-            printf("%02x ", buf_receive[i]);
+            printf("%02x\n", buf_receive[i]);
+            if(i != 0 && buf_receive[i] == 0x7e) break;
+        }
+        printf("End of response from receiver\n");        
+        #endif
+
+        if (bytes <= 0){ 
+            #ifdef DEBUG_llopen 
+            printf("No response from receiver\n"); 
+            #endif
+            return -1;
         }
 
-        if (bytes <= 0) return -1;
+        if(confirm_frame_control(buf_receive, CONTROL_UA) != 1){
+            #ifdef DEBUG_llopen 
+            printf("Invalid frame\n"); 
+            #endif
+            return -1;
+        }
 
-        if(confirm_frame_control(buf_receive, CONTROL_UA) != 1) return -1;
-            
+        #ifdef DEBUG_llopen
+        printf("Valid frame\n");
+        #endif
 
     } else if (ll.status == RECEIVER){ //wait for SET and send UA
+        
+        #ifdef DEBUG_llopen
         printf("Waiting for SET\n");
+        #endif
+        
+        ll.sequenceNumber = 1; // setups the sequence number, so the first iteration is expecting a sequence 0
+        reset_alarm();
         while(alarmCount == 0){
-            printf("cycle\n");
             if (alarmEnabled == FALSE){
                 alarmEnabled = TRUE;
                 alarm(RECEIVE_TIMEOUT);
             }
             bytes_read = read(fd, buf_receive, BUF_SIZE);
             if (bytes_read > 0){
-                printf("Bytes read: %d\n", bytes_read);
+                #ifdef DEBUG_llopen
+                printf("Incoming from transmitter\n");
                 for (int i = 0; i < bytes_read; i++){
                     printf("%02x\n", buf_receive[i]);
+                    if(i != 0 && buf_receive[i] == 0x7e) break;
                 }
+                printf("End of incoming from transmitter\n");
+                #endif
                 break;
             }
         }
         reset_alarm();
 
-        if (bytes_read <= 0) return -1;
+        if (bytes_read <= 0){
+            #ifdef DEBUG_llopen 
+            printf("No response from transmitter\n"); 
+            #endif
+            return -1;
+        }
 
         if(confirm_frame_control(buf_receive, CONTROL_SET) != 1){
+            #ifdef DEBUG_llopen 
+            printf("Invalid frame\n"); 
+            #endif
             return -1;
         } else {
             setFrame_UA(buf);
-            llwrite(fd, buf, BUF_SIZE);
+
+            #ifdef DEBUG_llopen 
+            printf("Valid frame, response to transmitter:\n"); 
+            for (int i = 0; i < BUF_SIZE; i++){
+                printf("%02x\n", buf[i]);
+                if(i != 0 && buf[i] == 0x7e) break;
+            }
+            printf("End of response to transmitter\n");
+            #endif
+
+            write(fd, buf, BUF_SIZE);
+            
+            #ifdef DEBUG_llopen 
+            printf("Frame sent\n"); 
+            #endif
         }
 
     } else {
         printf("Incorrect program usage\n");
         exit(1);
     }
+    #ifdef DEBUG_llopen
     printf("Connected to %s\n", ll.port);
+    #endif
     return fd;
 }
 
@@ -141,258 +200,197 @@ int llopen(const char *port, int role){
 //byte destuffing
 int llread(int fd, u_int8_t* buf, int length){
     (void)signal(SIGALRM, alarmHandler);
-    u_int8_t buf_receive[BUF_SIZE] = {0}; // tudo 
-    u_int8_t buf_send[BUF_SIZE] = {0};  // montar um frame 
-                                        // buf serve para a data 
-    u_int8_t buf_aux[BUF_SIZE] = {0};      // buf auxiliar          
-    int count=0;
-    int siz=0;
-    int bytes_read = read(fd, buf_receive, BUF_SIZE);
-    if(bytes_read < 0) return -1;
-    #ifdef DEBUG
-    printf("%s\n", buf);
-    #endif
-
-    u_int8_t ctrl_recv = confirm_header(buf_receive);
-    //if(ctrl_recv == -1) return -1;
+    u_int8_t buf_receive[BUF_SIZE] = {0}; 
+    u_int8_t buf_send[BUF_SIZE] = {0};  
     
-    for(int j=0; j< BUF_SIZE;j++){
-        switch(READ_STATE){
-            case START:
-                if(buf_receive[j]== FLAG){
-                    state= FLAG_RCV;
-                    //buf_receive[count]= FLAG;
-                    count ++;
-                }
-                else{
-                    state=START;
-                    count=0; 
-                }
-                printf("start\n");
-                break;
-            case FLAG_RCV:
-                if(buf_receive[j]== ADDRESS_SET){
-                    state=A_RCV;
-                    //buf_receive[count]= ADDRESS_SET ;
-                    count++;
-                }
-                else if(buf_receive[j]== FLAG){
-                    state=FLAG_RCV;
-                    count=1; //                
-                }
-                else {
-                    state= START;
-                    count=0; 
-                }
-                printf("flag\n");
-                break;
-            case A_RCV:
-                if(buf_receive[j] == 0x00){
-                    state = C_RCV;
-                   // buf_receive[count]= 0x00 ;
-                    count++;
-                    control=0;
-                  /* if(ll.sequenceNumber==0){
-                        ctrl=CONTROL_RR1;
-                        state=send;
-                   }
-                   else if(ll.sequenceNumber==1){
-                        ctrl=CONTROL_RR0;
-                   }*/
-                }
-                else if(buf_receive[j] == 0x40){
-                    state = C_RCV;
-                    //buf_receive[count]= 0x40 ;
-                    count++;
-                    control=4;
-                }
-               /* else if(buf_receive[j]== 0x0B){
-                    state = C_RCV;
-                    //buf_receive[count]= 0x0B ;
-                    count++;
-                    ctrl= CONTROL_DISC;
-                    control=0x0B;
-                }*/
+    int bytes_read = 0;
 
-                else if(buf_recieve[j]== FLAG){
-                    state=FLAG_RCV; 
-                    count=0;               
-                }
-                
-                else{
-                    state= START;
-                    count=0;
-                }
-                printf("adress\n");
-                break;
-            case C_RCV: 
-                if(buf_receive[j] == (ADDRESS_SET ^ control)){  /// BCC1 
-                    //buf_receive[count]= (ADDRESS_SET ^ control) ;
-                    count++;                   
-                    state = BCC_OK;
-                   
-                }
-                else if(buf_receive[j]== FLAG){
-                    state=FLAG_RCV; 
-                    count=0;       
-                }
-                else{              
-                    state= START;
-                    count=0;
-                }
-                printf("control\n");
-                break;
-            case BCC_OK:
-                /*
-                if it is a duplicate frame (Ns is not the expected) 
-                » the data field is discarded 
-                » a response RR(expected Ns) is sent 
-                
-                */
-                
-                if( control == 0 || control == 4){ // espera de N
-                    state= DATA; 
+    enum READ_STATE state = START;
+    enum llread_state llread_state = READ;
 
-                }
-                //else if (control == disc)
-                else state= START;
-                printf("BCC\n");
-                break;
-            case DATA:
-              
-                if (buf_receive[j]== 0x7d && buf_receive[j+1]== 0x5e){
-                  //  buf_receive[count]=0x7e;   mudar daqui para baixo 
-                    j++;
-                    count++;
-                   // dat+=1;
-                    buf_aux[siz]=0x7e;
-                    siz+=1;
-                }
-                else if (buf[j]== 0x7d && buf[j+1]== 0x5d){
-                    buf_receive[count]=0x7d;
-                    j++;
-                    count++;
-                    //dat+=1;
-                    buf_aux[siz]=0x7d;
-                    siz+=1;
-                }
-                else {
-                    buf_receive[count]=buf[j];
-                    count++;
-                    //dat+=1;
-                    buf_aux[siz]=buf[j];
-                    siz+=1;
-                }
-                if(buf[j]==0x7E){
-                    buf_receive[count]=buf[j]; // está a guardar tudo 
-                    buf_aux[siz]=buf[j]; // guarda só a data 
-                    siz+=1;
-                    state= BCC2;
-                }
-                bcc2=buf_aux[0];
-                break;
-            case BCC2:  
-                for (int h=1;h<siz-2;h++ ){ // pega no segundo de data até ao buf -flag -bcc2 e faz xor e guarda em bcc2
-                   bcc2 = (bcc2 ^ buf_aux[h]);    
-                   
-                }
-                if(bcc2==buf_receive[siz-1]){ //caso bcc2 esteja igual ao penultimo elemento do bufferstore avança para stop pois já deu store da flag 
-                   
-                    if( control== 0){
-                        ctrl=CONTROL_RR1;
-                        //the data field is passed to the Application layer 
+    int message_length = 0;
+    u_int8_t ctrl_send = 0;
+    u_int8_t bcc2 = 0;
+
+    int ret_data_length = -1;
+
+    int quit_read = FALSE;
+
+    while(quit_read == FALSE){
+        switch(llread_state){
+            case READ:
+
+                #ifdef DEBUG_llread
+                printf("Waiting for info frame\n");
+                #endif
+                reset_alarm();
+                while(alarmCount == 0){
+                    if (alarmEnabled == FALSE){
+                        alarmEnabled = TRUE;
+                        alarm(RECEIVE_TIMEOUT);
                     }
-                    else if( control == 4){
-                        ctrl=CONTROL_RR0;
-                       //the data field is passed to the Application layer 
-                    }
-                    state=SEND;
-                }
-                else {
-                   if(control==0){
-                        ctrl=CONTROL_REJ0;
-                        buf_aux[siz]={0};  // foi rejeitado dá reset a frame e a data 
-                        buf_receive[count]={0};
-                        siz=0;
-                        count=0;
-                    }
-                    if else(control==4){
-                        ctrl=CONTROL_REJ1;
-                        buf_aux[siz]={0}; 
-                        buf_receive[count]={0};
-                        siz=0;
-                        count=0;
+                    bytes_read = read(fd, buf_receive, BUF_SIZE);
+                    if (bytes_read > 0){
+                        break;
                     }
                 }
-                
+                reset_alarm();
+                if (bytes_read <= 0){
+                    printf("INFO FRAME never received\n");
+                    return -1;
+                }
+                llread_state = CONF_HEADER;
                 break;
-            case STP:
+
+            case CONF_HEADER: // confirm header and get message length
+                int control_received = confirm_header(buf_receive);
+                if (control_received == -1){
+                    printf("Invalid frame Header\n");
+                    return -1;
+                } else if(control_received == CONTROL_FRAME_0){
+                    ctrl_send = CONTROL_RR1;
+                } else if(control_received == CONTROL_FRAME_1){
+                    ctrl_send = CONTROL_RR0;
+                }
                 
-                printf("stop\n");
-                //STOP = TRUE ;
+                if(control_received == ll.sequenceNumber){
+                    llread_state = RESPOND;
+                }
+
+                for(int i = 1; i < BUF_SIZE; i++){
+                    if(buf_receive[i] == 0x7e){
+                        message_length = i;
+                        message_length += 1;
+                        break;
+                    }
+                }
+
+                #ifdef DEBUG_llread
+                printf("Message length: %d\n", message_length);	
+                #endif
+
+                llread_state = DESTUFF;
+
                 break;
-            case SEND:
-                
-                //printf("CORRECT\n");
-                buf_ua[0] = FLAG;              //
-                buf_ua[1] = ADDRESS_UA;           //
-                buf_ua[2] = ctrl;           //
-                buf_ua[3] = ADDRESS_UA ^ buf_ua[2]; //
-                //buf[3] = ADDRESS + TEST;
-                buf_ua[4] = FLAG;
 
-                int bytes = write(fd, buf_ua, BUF_SIZE);
-                printf("%d bytes written\n", bytes);
-                sleep(1);
-                state = START;
+
+            
+            case DESTUFF:
+                ret_data_length = destuff_bytes(buf_receive, buf, 4, message_length-1); //destuff up two the bcc2 byte
+                bcc2 = buf[ret_data_length];
+                buf[ret_data_length] = 0;
+
+                #ifdef DEBUG_llread
+                printf("llread, ret_data_length: %d\n", ret_data_length);
+                printf("bcc2: %02x\n", bcc2);
+                for(int i = 0; i < ret_data_length; i++){
+                    printf("buf[%d]: %02x\n", i, buf[i]);
+                }
+                #endif
+
+                llread_state = CONF_DATA;
                 break;
-        }	
-        
-       if(STOP==TRUE) break;
 
-    }
+            case CONF_DATA:
+                if(bcc2 != array_xor(buf, ret_data_length, 0, ret_data_length)){
+                    printf("Invalid frame Data\n");
+                    if(control_received == CONTROL_FRAME_0){
+                        ctrl_send = CONTROL_REJ0;
+                    } else if(control_received == CONTROL_FRAME_1){
+                        ctrl_send = CONTROL_REJ1;
+                    } else {
+                        printf("unexpected control received\n");
+                    }
+                }
+                llread_state = RESPOND;
+                break;
 
+            case RESPOND:
+                setFrame_SUP(buf_send, ctrl_send);
 
-    return bytes_read;
+                #ifdef DEBUG_llread
+                printf("Response frame to transmitter:\n");
+                for (int i = 0; i < ret_data_length; i++){
+                    printf("buf_send[%d]: %02x\n", i, buf_send[i]);
+                    if(i != 0 && buf_send[i] == 0x7e) break;
+                }
+                #endif
+
+                int bytes = write(fd, buf_send, BUF_SIZE);
+                if (bytes < 0){
+                    printf("Error sending frame\n");
+                    return -1;
+                }
+                llread_state = FINISH_READ;
+                break;
+
+            case FINISH_READ:
+
+                #ifdef DEBUG_llread
+                printf("FINISH_READ\n");	
+                #endif
+
+                ll.sequenceNumber = (ll.sequenceNumber + 1) % 2;
+                quit_read = TRUE;
+                break;
+        }
+        sleep(0.1);
+    }  
+    return ret_data_length;
 }
 
-int llwrite(int fd, const u_int8_t* buf, int length){
+
+int llwrite(int fd, u_int8_t* buf, int length){
     (void)signal(SIGALRM, alarmHandler);
 
     u_int8_t buf_send[BUF_SIZE] = {0};
     u_int8_t buf_retrieve[BUF_SIZE] = {0};
+
     int bytes = setFrame_DATA(buf_send, buf, length, ll.sequenceNumber);
+    
     int bytes_read = 0;
     int attempts = 0;
-    uid_t control = 0;
+    u_int8_t control = 0;
 
     // do{
     //     bytes_read = send_frame(buf_send, buf_retrieve, ll.numTransmissions, ll.timeout, fd);
     //     attempts++;
     // } while (attempts < ll.numTransmissions && (confirm_frame_control(buf_retrieve, &control) == -1 || bytes_read <= 0));
 
-    while(true){
+    //while(1){
         bytes_read = send_frame(buf_send, buf_retrieve, ll.numTransmissions, ll.timeout, fd);
         attempts++;
         
-        if(bytes_read > 0 && confirm_frame_control(buf_retrieve, &control) == 1){
+        #ifdef DEBUG_llwrite
+        printf("llwrite, bytes_read: %d\n", bytes_read);
+        for(int i = 0; i < 5; i++){
+            printf("buf_retrieve[%d]: %02x\n", i, buf_retrieve[i]);
+        }
+        #endif
+
+        if(bytes_read > 0 && confirm_frame(buf_retrieve, &control) == 1){
+
+            #ifdef DEBUG_llwrite
+            printf("llwrite, confirm state. Control received from receiver: %02x\n", control);
+            #endif
+
             if(control == CONTROL_REJ1 && ll.sequenceNumber == 1 || control == CONTROL_REJ0 && ll.sequenceNumber == 0){
-                continue;  
+                //continue;  
             } else if(control == CONTROL_RR0 && ll.sequenceNumber == 1 || control == CONTROL_RR1 && ll.sequenceNumber == 0){
-                break;
+                //break;
             } else {
                 printf("llwirte, confirm state. Unexpected Control signal. Control: %02x\n", control);
                 return -1;
             }
         }
         if(attempts == ll.numTransmissions) return -1;
-    }
+    //}
 
     ll.sequenceNumber = (ll.sequenceNumber == 0) ? 1 : 0;
     return bytes;
 }
 
- int llwrite_test(int fd, const u_int8_t* buf, int length){
+ int llwrite_test(int fd, u_int8_t* buf, int length){
     (void)signal(SIGALRM, alarmHandler);
 
     int bytes = write(fd, buf, BUF_SIZE);
@@ -412,28 +410,40 @@ int llclose(int fd){
     int bytes_read = 0;
 
     if(ll.status == TRANSMITTER){
-        setFrame_DISC(buf);
 
-        send_frame(buf, buf_retrieve, ll.numTransmissions, ll.timeout, fd);
+        #ifdef DEBUG_llclose
+        printf("Run llclose as TRANSMITTER\n");
+        #endif
         
-        if(confirm_frame_control(buf_retrieve, CONTROL_DISC) == -1){
+        setFrame_DISC(buf);
+        send_frame(buf, buf_retrieve, ll.numTransmissions, ll.timeout, fd); // Send DISC frame and wait for DISC
+        
+        if(confirm_frame_control(buf_retrieve, CONTROL_DISC) == -1){ // Check if DISC was received correctly
             printf("DISC not received\n");
-            return -1;
+            return -1; // If not, return -1
         }
 
-        setFrame_UA(buf);
-        send_frame(buf, buf_retrieve, ll.numTransmissions, ll.timeout, fd);
-
+        setFrame_UA(buf); // As the DISC frame was received correctly, send the UA frame
+        write(fd, buf, BUF_SIZE);
+        // Does not check if the UA frame was received correctly
 
     } else if (ll.status == RECEIVER){
-        while(alarmCount < ll.numTransmissions){
-            printf("Waiting for DISC\n");
+        reset_alarm();
+        while(alarmCount < ll.numTransmissions){ // Wait for DISC
+            
+            #ifdef DEBUG
+            if (alarmCount == 0){
+                printf("Waiting for DISC\n");
+            }
+            #endif
+            
+            
             if (alarmEnabled == FALSE){
                 alarmEnabled = TRUE;
                 alarm(RECEIVE_TIMEOUT);
             }
             bytes_read = read(fd, buf, BUF_SIZE);
-            if (bytes_read > 0 && confirm_frame_control(buf, CONTROL_DISC) == 1){
+            if (bytes_read > 0 && confirm_frame_control(buf, CONTROL_DISC) == 1){ // Check if DISC was received correctly
                 break;
             }
         }
@@ -460,7 +470,11 @@ int llclose(int fd){
     }
 
     close(fd);
+
+    #ifdef DEBUG_llclose
     printf("Disconnected from %s\n", ll.port);
+    #endif
+
     return 0;
 }
 
@@ -468,24 +482,102 @@ int llclose(int fd){
 int send_frame(u_int8_t*sender_buf, u_int8_t* receiver_buf, uid_t attempts, uid_t timeout, int fd){
     int bytes_read = 0;
 
+    #ifdef DEBUG_send_frame
+    printf("DEBUG: send_frame beginning\n");
     for(int i = 0; i < BUF_SIZE; i++){
         printf("%02x\n", sender_buf[i]);
+        if(i != 0 && sender_buf[i] == 0x7e) break;
     }
+    #endif
 
     while (alarmCount < attempts){
+
+        #ifdef DEBUG_send_frame
+        printf("alarmCount: %d", alarmCount);
+        printf("  attempts: %d\n", attempts);
+        #endif
+
         if (alarmEnabled == FALSE){
-            printf("Sending frame\n");	
+            #ifdef DEBUG_send_frame
+            if(alarmCount == 0){
+                printf("Sending frame\n");
+            }
+            #endif
+            
             write(fd, sender_buf, BUF_SIZE);
             alarm(timeout);
             alarmEnabled = TRUE;
         }
+        
+        #ifdef DEBUG_send_frame
+        printf("reading\n");
+        #endif
+
         bytes_read = read(fd, receiver_buf, BUF_SIZE);
+
+        #ifdef DEBUG_send_frame
+        printf("bytes_read: %d\n", bytes_read);
+        #endif
 
         if(bytes_read != 0)
             break;
     }
     reset_alarm();
     return bytes_read;
+}
+
+int destuff_bytes(u_int8_t* orig, u_int8_t* target, uid_t init_index, uid_t final_index){
+    if (final_index >= BUF_SIZE){
+        printf("destuff_bytes final_index >= BUF_SIZE\n");
+        return -1;
+    }
+    if(init_index > final_index){
+        printf("destuff_bytes init_index > final_index\n");
+        return-1;
+    }
+    
+    int new_length = final_index - init_index-1;
+    int target_index = 0;
+
+    for(int i = init_index; i <= final_index; i ++){
+        if (orig[i] == 0x7d && orig[i+1] == 0x5e){
+            target[target_index] = 0x7e;
+            #ifdef DEBUG_destuff_bytes
+            printf("orig[%d]: %02x, orig[%d]: %02x", i, orig[i], i+1, orig[i+1]);
+            printf("  target[%d]: %02x\n", target_index, target[target_index]);
+            #endif
+            i+=1;
+            new_length-=1;
+        } else if (orig[i] == 0x7d && orig[i+1] == 0x5d){
+            target[target_index] = 0x7d;
+            #ifdef DEBUG_destuff_bytes
+            printf("orig[%d]: %02x, orig[%d]: %02x", i, orig[i], i+1, orig[i+1]);
+            printf("  target[%d]: %02x\n", target_index, target[target_index]);
+            #endif
+            i+=1;
+            new_length-=1;
+        } else {
+            target[target_index] = orig[i];
+            #ifdef DEBUG_destuff_bytes
+            printf("orig[%d]: %02x", i, orig[i]);
+            printf("  target[%d]: %02x\n", target_index, target[target_index]);
+            #endif
+        }
+
+        target_index+=1;
+    }
+
+    #ifdef DEBUG_destuff_bytes
+    printf("DEBUG destuff_bytes, new_length: %d\n", ++new_length);
+
+    printf("DEBUG destuff_bytes output:\n");
+    for(int i=0;i< BUF_SIZE;i++){
+        printf("%02x\n",target[i]);
+    }
+    printf("end of destuff\n");
+    #endif
+
+    return new_length;
 }
 
 int stuff_bytes(u_int8_t* data_packet, u_int8_t* buf, uid_t packet_size, uid_t offset){
@@ -506,27 +598,37 @@ int stuff_bytes(u_int8_t* data_packet, u_int8_t* buf, uid_t packet_size, uid_t o
         }
     }
 
+    #ifdef DEBUG_stuff_bytes
+    printf("DEBUG stuff_bytes output:\n");
     for(int i=0;i< BUF_SIZE;i++){
-        
+        printf("%02x\n",buf[i]);
         if(buf[i] == 0x7E && i != 0) break;
     }
+    #endif
     return n_stuffed_bytes;
 }
 
 u_int8_t array_xor(u_int8_t* array, int arr_size, uid_t init_index, uid_t final_index){
-    #ifdef DEBUG
+    #ifdef DEBUG_array_xor
     printf("DEBUG: array_xor\n");
     #endif
 
-    if(final_index >= arr_size) return 0;
+    if(final_index >= BUF_SIZE){
+        printf("array_xor: Index out of bounds\n"); return 0;
+    }
+
     unsigned char ret_xor = 0;
     for (int i = init_index; i<=final_index; i++){
         ret_xor = array[i] ^ ret_xor;
         
-        #ifdef DEBUG
+        #ifdef DEBUG_array_xor
         printf("ret_xor[%d]: %02x\n", i, ret_xor);
         #endif
     }
+
+    #ifdef DEBUG_array_xor
+    printf("ret_xor final value: %02x\n", ret_xor);
+    #endif
     return ret_xor;
 }
 
@@ -542,6 +644,14 @@ void setFrame_UA(u_int8_t* buf){
     buf[0] = FLAG;
     buf[1] = ADDRESS_EMIT;
     buf[2] = CONTROL_UA;
+    buf[3] = buf[1]^buf[2]; 
+    buf[4] = FLAG;
+}
+
+void setFrame_SUP(u_int8_t* buf, u_int8_t control){
+    buf[0] = FLAG;
+    buf[1] = ADDRESS_EMIT;
+    buf[2] = control;
     buf[3] = buf[1]^buf[2]; 
     buf[4] = FLAG;
 }
@@ -580,6 +690,8 @@ void setFrame_MOCK1(u_int8_t* buf){
 }
 
 int setFrame_DATA(u_int8_t* buf, u_int8_t* data_packet, uid_t packet_size, u_int8_t control){
+    //printf("KASHGDFAJHSD: %d", packet_size);
+    
     u_int8_t bcc2;
     
     buf[0] = FLAG;
@@ -589,6 +701,10 @@ int setFrame_DATA(u_int8_t* buf, u_int8_t* data_packet, uid_t packet_size, u_int
     //Assemble Data Packet W/ byte stuffing
     int added_bytes = stuff_bytes(data_packet, buf, packet_size, 4); //number of bytes added by the stuffing function
     
+    #ifdef DEBUG_setFrame_DATA
+    printf("setFrame_DATA, added_bytes: %d\n", added_bytes);
+    #endif
+
     bcc2 = array_xor(data_packet, packet_size, 0, packet_size-1); //BCC2
     
     if(bcc2 == 0x7e){
@@ -599,12 +715,13 @@ int setFrame_DATA(u_int8_t* buf, u_int8_t* data_packet, uid_t packet_size, u_int
         buf[4+packet_size+added_bytes] = 0x7d;
         added_bytes+=1;
         buf[4+packet_size+added_bytes] = 0x5d;
+    } else {
+        buf[4+packet_size+added_bytes] = bcc2; //BCC2
     }
-    buf[4+packet_size+added_bytes] = bcc2; //BCC2
     buf[4+packet_size+added_bytes+1] = FLAG;                                              //FLAG
-    #ifdef DEBUG
-    printf("DEBUG: setFrame_DATA\n");
-    for(int i=0; i< 4+packet_size+added_bytes+3; i++){
+    #ifdef DEBUG_setFrame_DATA
+    printf("DEBUG setFrame_DATA, assembled frame:\n");
+    for(int i=0; i< 4+packet_size+added_bytes+2; i++){
         printf("buf[%d] = %02x\n", i, buf[i]);
     }
     #endif

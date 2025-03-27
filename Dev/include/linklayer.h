@@ -17,12 +17,14 @@
 #define TRANSMITTER 0
 #define RECEIVER 1
 #define BAUDRATE B38400
-#define RECEIVE_TIMEOUT 30 // in seconds
-#define TRANSMIT_TIMEOUT 1
+#define RECEIVE_TIMEOUT 60 // in seconds
+#define TRANSMIT_TIMEOUT 3
 #define MAX_TRANSMISSION_ATTEMPTS 5
 
-#define BUF_SIZE 32 //256
+#define BUF_SIZE 64 //256
 #define HEADER_SIZE 4
+#define FOOTER_SIZE 2
+//#define PACKET_SIZE BUF_SIZE-HEADER_SIZE-FOOTER_SIZE - 1 // -1 in case the bcc2 is 2 bytes
 
 #define FLAG            0x7E
 #define ADDRESS_RECV    0x03
@@ -58,13 +60,15 @@ int llopen(const char *port, int role);
 
 int llread(int fd, u_int8_t* buf, int length);
 
-int llwrite(int fd, const u_int8_t* buf, int length);
+int llwrite(int fd,u_int8_t* buf, int length);
 
-int llwrite_test(int fd, const u_int8_t* buf, int length);
+int llwrite_test(int fd, u_int8_t* buf, int length);
 
 int llclose(int fd);
 
 int send_frame(u_int8_t*sender_buf, u_int8_t* receiver_buf, uid_t attempts, uid_t timeout, int fd);
+
+int destuff_bytes(u_int8_t* orig, u_int8_t* target, uid_t init_index, uid_t final_index);
 
 int stuff_bytes(u_int8_t* data_packet, u_int8_t* buf, uid_t packet_size, uid_t offset);
 
@@ -73,6 +77,8 @@ u_int8_t array_xor(u_int8_t* array, int arr_size, uid_t init_index, uid_t final_
 void setFrame_SET(u_int8_t* buf);
 
 void setFrame_UA(u_int8_t* buf);
+
+void setFrame_SUP(u_int8_t* buf, u_int8_t control);
 
 void setFrame_DISC(u_int8_t* buf);
 

@@ -1,6 +1,8 @@
 {
     "files.associations": {
+        "*.tex": "latex-expl3",
         "signal.h": "c",
-        "linklayer.h": "c"
+        "linklayer.h": "c",
+        "string.h": "c"
     }
 }

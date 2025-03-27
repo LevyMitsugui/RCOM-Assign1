@@ -22,10 +22,18 @@ int main(int argc, char *argv[]){
     }
     
     u_int8_t incoming_bytes[BUF_SIZE] = {0};
-    llread(al.fileDescriptor, incoming_bytes, BUF_SIZE);
+    int bytes_read = llread(al.fileDescriptor, incoming_bytes, BUF_SIZE);
 
-    for(int i = 0; i < BUF_SIZE; i++){
-        if(incoming_bytes[i] == '\0') break;
+    printf("Application Layer, Received %d bytes\n", bytes_read);
+
+    if (bytes_read < 0)
+    {
+        printf("Error in llread\n");
+        return -1;
+    }
+
+    printf("Application Layer, Received: ");
+    for(int i = 0; i < bytes_read; i++){
         printf("%02x\n", incoming_bytes[i]);
     }
 
