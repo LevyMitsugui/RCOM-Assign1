@@ -12,7 +12,7 @@
 // #define DEBUG_llwrite
 
 
-enum READ_STATE { START, FLAG_RCV, A_RCV, C_RCV, BCC_OK, BCC2 , DATA , SEND ,STP};
+enum READ_STATE { START, FLAG_RCV, A_RCV, C_RCV, C_FRAME_0, C_FRAME_1, BCC_OK, BCC2 , DATA , SEND ,STP};
 enum llread_state {READ, CONF_HEADER, DESTUFF, CONF_DATA, RESPOND, FINISH_READ};
 //typedef struct linkLayer linkLayer;
 //linkLayer ll;
@@ -76,9 +76,9 @@ int llopen(const char *port, int role){
 
     // Set input mode (non-canonical, no echo,...)
     newtio.c_lflag = 0;
-    newtio.c_cc[VMIN] = 0;  // Blocking read until 5 chars received
-    newtio.c_cc[VTIME] = 5; // Inter-character timer unused
-
+    newtio.c_cc[VMIN] =  0;  
+    newtio.c_cc[VTIME] = 1;
+    
     tcflush(fd, TCIOFLUSH);
 
     // Set new port settings
@@ -200,152 +200,234 @@ int llopen(const char *port, int role){
 //byte destuffing
 int llread(int fd, u_int8_t* buf, int length){
     (void)signal(SIGALRM, alarmHandler);
-    u_int8_t buf_receive[BUF_SIZE] = {0}; 
-    u_int8_t buf_send[BUF_SIZE] = {0};  
+    u_int8_t buf_receive = 0; // tudo 
+    u_int8_t buf_send[BUF_SIZE] = {0};  // montar um frame 
+    u_int8_t buf_copy[BUF_SIZE] = {0};                                    // buf serve para a data 
+    u_int8_t buf_data[BUF_SIZE] = {0};      // buf auxiliar 
     
+    int control=0;  
+    int ctrl = 0;       
+    int count=0;
+    int siz=0;
     int bytes_read = 0;
-
     enum READ_STATE state = START;
-    enum llread_state llread_state = READ;
 
-    int message_length = 0;
-    u_int8_t ctrl_send = 0;
-    u_int8_t bcc2 = 0;
+    int STOP = FALSE;
 
-    int ret_data_length = -1;
-
-    int quit_read = FALSE;
-
-    while(quit_read == FALSE){
-        switch(llread_state){
-            case READ:
-
-                #ifdef DEBUG_llread
-                printf("Waiting for info frame\n");
-                #endif
-                reset_alarm();
-                while(alarmCount == 0){
-                    if (alarmEnabled == FALSE){
-                        alarmEnabled = TRUE;
-                        alarm(RECEIVE_TIMEOUT);
-                    }
-                    bytes_read = read(fd, buf_receive, BUF_SIZE);
-                    if (bytes_read > 0){
-                        break;
-                    }
+    u_int8_t ctrl_recv = confirm_header(buf_receive);
+    if(ctrl_recv == -1) return -1;
+    
+    while(!STOP){
+        bytes_read = read(fd, buf_receive, BUF_SIZE);
+        switch(state){
+            case START:
+                if(buf_receive == FLAG){
+                    state= FLAG_RCV;
+                    buf_copy[count]= FLAG;
+                    count ++;
                 }
-                reset_alarm();
-                if (bytes_read <= 0){
-                    printf("INFO FRAME never received\n");
-                    return -1;
+                else{
+                    state=START;
+                    count=0; 
                 }
-                llread_state = CONF_HEADER;
+                printf("start\n");
                 break;
+            case FLAG_RCV:
+                if(buf_receive == ADDRESS_RECV){
+                    state=A_RCV;
+                    buf_copy[count]= ADDRESS_RECV ;
+                    count++;
+                }
+                else if(buf_receive == FLAG){
+                    state=FLAG_RCV;
+                    count=0;                
+                }
+                else {
+                    state= START;
+                    count=0; 
+                }
+                printf("flag\n");
+                break;
+            case A_RCV:
+                if(buf_receive == 0x00){
+                    state = C_RCV;
+                    buf_copy[count]= 0x00 ;
+                    count++;
+                    control=0;
+                }
+                else if(buf_receive == 0x40){
+                    state = C_RCV;
+                    buf_copy[count]= 0x40 ;
+                    count++;
+                    control=4;
+                }
+               /* else if(buf_receive[j]== 0x0B){
+                    state = C_RCV;
+                    //buf_receive[count]= 0x0B ;
+                    count++;
+                    ctrl= CONTROL_DISC;
+                    control=0x0B;
+                }*/
 
-            case CONF_HEADER: // confirm header and get message length
-                int control_received = confirm_header(buf_receive);
-                if (control_received == -1){
-                    printf("Invalid frame Header\n");
-                    return -1;
-                } else if(control_received == CONTROL_FRAME_0){
-                    ctrl_send = CONTROL_RR1;
-                } else if(control_received == CONTROL_FRAME_1){
-                    ctrl_send = CONTROL_RR0;
+                else if(buf_receive== FLAG){
+                    state=FLAG_RCV; 
+                    count=0;               
                 }
                 
-                if(control_received == ll.sequenceNumber){
-                    llread_state = RESPOND;
+                else{
+                    state= START;
+                    count=0;
                 }
-
-                for(int i = 1; i < BUF_SIZE; i++){
-                    if(buf_receive[i] == 0x7e){
-                        message_length = i;
-                        message_length += 1;
-                        break;
+                printf("adress\n");
+                break;
+            case C_RCV: 
+                if(buf_receive == (ADDRESS_RECV ^ control)){  /// BCC1 
+                    buf_copy[count]= (ADDRESS_RECV ^ control) ;
+                    count++;                   
+                    state = BCC_OK;
+                   
+                }
+                else if(buf_receive== FLAG){
+                    state=FLAG_RCV; 
+                    count=0;       
+                }
+                else{              
+                    state= START;
+                    count=0;
+                }
+                printf("control\n");
+                break;
+            case BCC_OK:
+                /*
+                if it is a duplicate frame (Ns is not the expected) 
+                » the data field is discarded 
+                » a response RR(expected Ns) is sent 
+                
+                */
+                
+                if(ll.sequenceNumber==control){
+                    if(control==0){
+                        ctrl=CONTROL_RR1;
+                        buf_copy[count]={0};
+                        count=0;
+                        state = SEND;
+                    }
+                    else if(control==4){
+                        ctrl=CONTROL_RR0;
+                        buf_copy[count]={0};
+                        count=0;
+                        state = SEND;
                     }
                 }
-
-                #ifdef DEBUG_llread
-                printf("Message length: %d\n", message_length);	
-                #endif
-
-                llread_state = DESTUFF;
-
+        
+                
+                else { // espera de N
+                    if(control==0 || control==4){
+                        state= DATA; 
+                    }
+                    else state= START;
+                    
+                }
+                
+                
+                printf("BCC\n");
                 break;
-
-
-            
-            case DESTUFF:
-                printf("Message length = %d\n", message_length);
-                if(message_length < 1) {    
-                    printf("Invalid frame Data\n");
-                    state = RESPOND;
-                    break;
+            case DATA:
+              
+                if (buf_receive == 0x7d && buf_[j+1]== 0x5e){
+                    buf_copy[count]=0x7e;   mudar daqui para baixo 
+                    j++;
+                    count++;
+                   // dat+=1;
+                    buf_data[siz]=0x7e; //buf_data 
+                    siz+=1;
                 }
-                ret_data_length = destuff_bytes(buf_receive, buf, 4, message_length-1); //destuff up two the bcc2 byte
-                if(ret_data_length == -1){
-                    printf("something went worng in state DESTUFF\n");
+                else if (buf_receive[j]== 0x7d && buf_receive[j+1]== 0x5d){
+                    buf_copy[count]=0x7d;
+                    j++;
+                    count++;
+                    //dat+=1;
+                    buf_data[siz]=0x7d;
+                    siz+=1;
                 }
-                bcc2 = buf[ret_data_length];
-                buf[ret_data_length] = 0;
-
-                #ifdef DEBUG_llread
-                printf("llread, ret_data_length: %d\n", ret_data_length);
-                printf("bcc2: %02x\n", bcc2);
-                for(int i = 0; i < ret_data_length; i++){
-                    printf("buf[%d]: %02x\n", i, buf[i]);
+                else {
+                    buf_copy[count]=buf_receive[j];
+                    count++;
+                    //dat+=1;
+                    buf_data[siz]=buf_receive[j];
+                    siz+=1;
                 }
-                #endif
-
-                llread_state = CONF_DATA;
+                if(buf[j]==0x7E){
+                    buf_copy[count]=buf_receive[j]; // está a guardar tudo 
+                    buf_data[siz]=buf_receive[j]; // guarda só a data 
+                    siz+=1;
+                    state= BCC2;
+                }
+                bcc2=buf_data[0];
                 break;
-
-            case CONF_DATA:
-                if(bcc2 != array_xor(buf, ret_data_length, 0, ret_data_length)){
-                    printf("Invalid frame Data\n");
-                    if(control_received == CONTROL_FRAME_0){
-                        ctrl_send = CONTROL_REJ0;
-                    } else if(control_received == CONTROL_FRAME_1){
-                        ctrl_send = CONTROL_REJ1;
-                    } else {
-                        printf("unexpected control received\n");
+            case BCC2:  
+                for (int h=1;h<siz-2;h++ ){ // pega no segundo de data até ao buf -flag -bcc2 e faz xor e guarda em bcc2
+                   bcc2 = (bcc2 ^ buf_data[h]);    
+                   
+                }
+                if(bcc2==buf_copy[siz-1]){ //caso bcc2 esteja igual ao penultimo elemento do bufferstore avança para stop pois já deu store da flag 
+                   
+                   if( control== 0){
+                        ctrl=CONTROL_RR1;
+                        //the data field is passed to the Application layer 
+                    }
+                    else if( control == 4){
+                        ctrl=CONTROL_RR0;
+                       //the data field is passed to the Application layer 
+                    }
+                    state=SEND;
+                }
+                else {
+                   if(control==0){
+                        ctrl=CONTROL_REJ0;
+                        buf_data[siz]={0};  // foi rejeitado dá reset a frame e a data 
+                        buf_copy[count]={0};
+                        siz=0;
+                        count=0;
+                    }
+                    if else(control==4){
+                        ctrl=CONTROL_REJ1;
+                        buf_data[siz]={0}; 
+                        buf_copy[count]={0};
+                        siz=0;
+                        count=0;
                     }
                 }
-                llread_state = RESPOND;
+                
                 break;
-
-            case RESPOND:
-                setFrame_SUP(buf_send, ctrl_send);
-
-                #ifdef DEBUG_llread
-                printf("Response frame to transmitter:\n");
-                for (int i = 0; i < ret_data_length; i++){
-                    printf("buf_send[%d]: %02x\n", i, buf_send[i]);
-                    if(i != 0 && buf_send[i] == 0x7e) break;
-                }
-                #endif
+            case STP:
+                
+                printf("stop\n");
+                STOP = TRUE ;
+                break;
+            case SEND:
+                
+                //printf("CORRECT\n");
+                buf_send[0] = FLAG;              //
+                buf_send[1] = ADDRESS_RECV;           //
+                buf_send[2] = ctrl;           //
+                buf_send[3] = ADDRESS_EMIT ^ buf_send[2]; //
+                //buf[3] = ADDRESS + TEST;
+                buf_send[4] = FLAG;
 
                 int bytes = write(fd, buf_send, BUF_SIZE);
-                if (bytes < 0){
-                    printf("Error sending frame\n");
-                    return -1;
-                }
-                llread_state = FINISH_READ;
+                printf("%d bytes written\n", bytes);
+                sleep(1);
+                state = START;
                 break;
+        }	
+        
+       if(STOP==TRUE) break;
 
-            case FINISH_READ:
+    }
 
-                #ifdef DEBUG_llread
-                printf("FINISH_READ\n");	
-                #endif
 
-                ll.sequenceNumber = (ll.sequenceNumber + 1) % 2;
-                quit_read = TRUE;
-                break;
-        }
-        sleep(0.1);
-    }  
-    return ret_data_length;
+    return bytes_read;
 }
 
 
