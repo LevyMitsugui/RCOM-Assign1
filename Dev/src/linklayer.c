@@ -613,6 +613,7 @@ u_int8_t array_xor(u_int8_t* array, int arr_size, uid_t init_index, uid_t final_
     printf("DEBUG: array_xor\n");
     #endif
 
+    printf("final_index: %d, BUF_SIZE: %d\n", final_index, BUF_SIZE);
     if(final_index >= BUF_SIZE){
         printf("array_xor: Index out of bounds\n"); return 0;
     }

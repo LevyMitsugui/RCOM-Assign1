@@ -1,5 +1,6 @@
 #include "linklayer.h"
 
+
 struct applicationLayer {
     int fileDescriptor; /*Serial port descriptor*/
     int status; /*TRANSMITTER | RECEIVER*/
@@ -32,7 +33,7 @@ int main(int argc, char *argv[]){
         return -1;
     }
 
-    printf("Application Layer, Received: ");
+    printf("Application Layer, Received: \n");
     for(int i = 0; i < bytes_read; i++){
         printf("%02x\n", incoming_bytes[i]);
     }
