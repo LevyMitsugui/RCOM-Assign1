@@ -53,6 +53,8 @@ typedef struct{
     char frame[BUF_SIZE]; /*Frame*/
 } linkLayer;
 
+typedef enum { START, FLAG_RCV, A_RCV, C_RCV, C_FRAME_0, C_FRAME_1, BCC_OK, BCC2 , DATA, DATA_DESTUFF , SEND ,STP} READ_STATE;
+
 extern linkLayer ll;
 
 linkLayer create_link_layer(const char *port, int baudRate, uid_t timeout, uid_t numTransmissions);
@@ -91,6 +93,7 @@ int confirm_header(u_int8_t* receiver_buf);
 
 int confirm_frame_control(u_int8_t* receiver_buf, u_int8_t control);
 
-int confirm_frame(u_int8_t* receiver_buf, u_int8_t* control);
-
+//int confirm_frame(u_int8_t* receiver_buf, u_int8_t* control);
+int confirm_frame(READ_STATE* state_machine, u_int8_t byte, u_int8_t control);
+  
 #endif
