@@ -4,7 +4,8 @@
 //#define DEBUG_llopen
 // #define DEBUG_llclose
 // #define DEBUG_llwrite
-#define DEBUG_llread
+// #define DEBUG_llread
+#define DEBUG_llread2
 // #define DEBUG_send_frame
 // #define DEBUG_setFrame_DATA
 // #define DEBUG_array_xor
@@ -27,7 +28,6 @@ int alarmEnabled = FALSE;
 int alarmCount = 0;
 void alarmHandler(int signal)
 {
-    printf("Alarm #%d\n", alarmCount);
     alarmEnabled = FALSE;
     alarmCount++;
 }
@@ -208,6 +208,7 @@ int llopen(const char *port, int role){
     #ifdef DEBUG_llopen
     printf("Connected to %s\n", ll.port);
     #endif
+    printf("Connected to %s\n", ll.port);//TODO remove
     return fd;
 }
 
@@ -219,6 +220,7 @@ int llread(int fd, u_int8_t* buf, int length){
     int buf_index = 0;
     u_int8_t buf_send[SUPERV_FRAME_SIZE] = {0}; // used to build a response frame 
     
+    u_int8_t prev_byte = 0;
     u_int8_t incoming_byte = 0;     // byte read from the channel shall be stored here
     int bytes_read = 0;             // bytes read by the read syscall
 
@@ -240,10 +242,14 @@ int llread(int fd, u_int8_t* buf, int length){
 
 
     while(STOP == FALSE){
+        prev_byte = incoming_byte;
         
         bytes_read = read(fd, &incoming_byte, 1);
         if(bytes_read <= 0) continue;
 
+        #ifdef DEBUG_llread2
+        printf("Current STATE: %d, incoming_byte: %02x\n", state, incoming_byte);
+        #endif
 
         frame_length++;
         switch(state){
@@ -268,7 +274,7 @@ int llread(int fd, u_int8_t* buf, int length){
                     address_received = incoming_byte;
                     state = A_RCV;
                 } else if(incoming_byte == FLAG){
-                    state = START;
+                    state = FLAG_RCV;
                 } else {
                     state = START;
                 }
@@ -331,6 +337,7 @@ int llread(int fd, u_int8_t* buf, int length){
                     buf[buf_index] = incoming_byte;
                     buf_index+=1;
                 }
+                break;
 
             case DATA_DESTUFF:
                 #ifdef DEBUG_llread
@@ -355,17 +362,36 @@ int llread(int fd, u_int8_t* buf, int length){
                 #ifdef DEBUG_llread
                 printf("BCC2 state\n");
                 #endif  
+                bcc2_received = buf[buf_index-1];
+                bcc2 = array_xor(buf, buf_index-1, 0, buf_index-2);
+
+                #ifdef DEBUG_llread2
+                printf("bcc2_received: %02x\n", bcc2_received);
+                printf("bcc2 calculated: %02x\n", bcc2);
+                #endif
+                
+                if(bcc2 == bcc2_received){
+                    state = STP;
+                } else {
+                    state = DATA;
+                }
+
                 break;    
             case STP:
                 #ifdef DEBUG_llread
                 printf("STOP state\n");
                 #endif
+                data_length = buf_index-1;
+                ll.sequenceNumber = (ll.sequenceNumber + 1) % 2;
                 STOP = TRUE;
                 break;
 
         }
+        #ifdef DEBUG_llread2
+        printf("Next STATE: %d\n", state);
+        #endif
     }  
-    return 0;
+    return data_length;
 }
 
 
@@ -378,6 +404,13 @@ int llwrite(int fd, u_int8_t* buf, int length){
     u_int8_t incoming_byte = 0;
     int bytes = setFrame_DATA(buf_send, buf, length, ll.sequenceNumber);
     
+    #ifdef DEBUG_llwrite
+    printf("llwrite, bytes: %d\n", bytes);
+    for(int i = 0; i < 5; i++){
+        printf("buf_send[%d]: %02x\n", i, buf_send[i]);
+    }
+    #endif
+
     int bytes_read = 0;
     int attempts = 0;
     u_int8_t control = 0;

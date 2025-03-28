@@ -1,6 +1,6 @@
 #include "linklayer.h"
 
-#define PACK_SIZE 16
+#define PACK_SIZE 10
 
 struct applicationLayer {
     int fileDescriptor; /*Serial port descriptor*/
@@ -18,15 +18,22 @@ int main(int argc, char *argv[]){
 
     ll = create_link_layer(argv[1], BAUDRATE, TRANSMIT_TIMEOUT, MAX_TRANSMISSION_ATTEMPTS);
 
-    u_int8_t buf[PACK_SIZE] = {0};
+    u_int8_t buf[16] = {0};
 
     for(int i = 0; i < PACK_SIZE; i++){
         buf[i] = i;
     }
 
-    buf[3] = 0x7e;
-    // buf[8] = 0x7d;
-    // buf[11] = 0x7e;
+    // buf[0] = 0x7e;
+    // buf[1] = 0x03;
+    // buf[2] = 0x00;
+    // buf[3] = 0x03;
+    // buf[4] = 0x01;
+    // buf[5] = 0x02;
+    // buf[6] = 0x03;
+    // buf[7] = 0x04;
+    // buf[8] = 0x04;
+    // buf[9] = 0x7e;
 
     
 
@@ -36,6 +43,7 @@ int main(int argc, char *argv[]){
         return -1;
     }
 
+    //write(al.fileDescriptor, buf, PACK_SIZE);
     written_bytes = llwrite(al.fileDescriptor, buf, PACK_SIZE);
     printf("Application Layer sent: \n");
     for(int i = 0; i < PACK_SIZE; i++){
