@@ -1,15 +1,15 @@
 #include "linklayer.h"
 
-// #define DEBUG 
-// #define DEBUG_llopen
-// #define DEBUG_llclose
-// #define DEBUG_send_frame
-//#define DEBUG_setFrame_DATA
-//#define DEBUG_array_xor
-//#define DEBUG_stuff_bytes
-//#define DEBUG_destuff_bytes
-//#define DEBUG_llread
-// #define DEBUG_llwrite
+#define DEBUG 
+#define DEBUG_llopen
+#define DEBUG_llclose
+#define DEBUG_send_frame
+#define DEBUG_setFrame_DATA
+#define DEBUG_array_xor
+#define DEBUG_stuff_bytes
+#define DEBUG_destuff_bytes
+#define DEBUG_llread
+#define DEBUG_llwrite
 
 
 
