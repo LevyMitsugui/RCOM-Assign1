@@ -1,15 +1,18 @@
 #include "linklayer.h"
 
-#define DEBUG 
-#define DEBUG_llopen
-#define DEBUG_llclose
-#define DEBUG_send_frame
-#define DEBUG_setFrame_DATA
-#define DEBUG_array_xor
-#define DEBUG_stuff_bytes
-#define DEBUG_destuff_bytes
+// #define DEBUG 
+//#define DEBUG_llopen
+// #define DEBUG_llclose
+// #define DEBUG_llwrite
 #define DEBUG_llread
-#define DEBUG_llwrite
+// #define DEBUG_send_frame
+// #define DEBUG_setFrame_DATA
+// #define DEBUG_array_xor
+// #define DEBUG_stuff_bytes
+// #define DEBUG_destuff_bytes
+// #define DEBUG_llread
+// #define DEBUG_llwrite
+//#define DEBUG_confirm_frame_control
 
 
 
@@ -24,6 +27,7 @@ int alarmEnabled = FALSE;
 int alarmCount = 0;
 void alarmHandler(int signal)
 {
+    printf("Alarm #%d\n", alarmCount);
     alarmEnabled = FALSE;
     alarmCount++;
 }
@@ -90,44 +94,67 @@ int llopen(const char *port, int role){
     //--- --- --- --- --- --- ---
 
     alarmCount = 0;
-    int bytes_read = 0;
     u_int8_t buf[BUF_SIZE] = {0};
     u_int8_t buf_receive[BUF_SIZE] = {0};
     u_int8_t incoming_byte = 0;
 
+    READ_STATE SM_llopen = READ;
+
+    int n_bytes = 0;
+    int st = 0;
+    int STOP = FALSE;
+
     if (ll.status == TRANSMITTER){ //send SET and wait for UA
         setFrame_SET(buf);
-        int bytes = 0;
         
         //bytes = write(fd, buf, SUPERV_FRAME_SIZE);
-        bytes = send_frame(buf, &incoming_byte, ll.numTransmissions, ll.timeout, fd);
+        //bytes = send_frame(buf, &incoming_byte, ll.numTransmissions, ll.timeout, fd);
         
-        #ifdef DEBUG_llopen
-        printf("Response from receiver:\n");        
-        for (int i = 0; i < bytes; i++){
-            printf("%02x\n", buf_receive[i]);
-            if(i != 0 && buf_receive[i] == 0x7e) break;
-        }
-        printf("End of response from receiver\n");        
-        #endif
+        while(alarmCount <= ll.numTransmissions && STOP != TRUE){
+            
+            if(alarmEnabled == FALSE){
+                n_bytes = write(fd, buf, SUPERV_FRAME_SIZE);
+                if (n_bytes < 0){
+                    printf("Error sending frame\n");
+                    return -1;
+                }
+                alarmEnabled = TRUE;
+                alarm(ll.timeout);
+            }
 
-        if (bytes <= 0){ 
-            #ifdef DEBUG_llopen 
-            printf("No response from receiver\n"); 
+            n_bytes = read(fd, &incoming_byte, 1);
+            
+            #ifdef DEBUG_llopen
+            printf("llopen as transmitter, incoming_byte: %02x\n", incoming_byte);
+            #endif
+
+            st = confirm_frame_control(&SM_llopen, incoming_byte, CONTROL_UA);
+            #ifdef DEBUG_llopen
+            printf("llopen as transmitter, st: %d\n", st);
+            #endif
+            
+            if (st > 0){
+                alarm(0);
+                alarmEnabled = FALSE;
+            } else if (st < 0){
+                alarm(TRANSMIT_TIMEOUT);
+                alarmEnabled = TRUE;
+            }
+            if (st == 15){
+                #ifdef DEBUG_llopen
+                printf("Received UA\n");
+                #endif
+                STOP = TRUE;
+            }
+        }
+        reset_alarm();
+
+        if(st != 15){
+            #ifdef DEBUG_llopen
+            printf("Error: llopen as transmitter. No UA received or identified after %d attempts\n", ll.numTransmissions);
             #endif
             return -1;
         }
-
-        if(confirm_frame_control(buf_receive, CONTROL_UA) != 1){
-            #ifdef DEBUG_llopen 
-            printf("Invalid frame\n"); 
-            #endif
-            return -1;
-        }
-
-        #ifdef DEBUG_llopen
-        printf("Valid frame\n");
-        #endif
 
     } else if (ll.status == RECEIVER){ //wait for SET and send UA
         
@@ -136,60 +163,43 @@ int llopen(const char *port, int role){
         #endif
         READ_STATE SM_llopen = START;
         ll.sequenceNumber = 1; // setups the sequence number, so the first iteration is expecting a sequence 0
+        
         reset_alarm();
         while(alarmCount == 0){
-            if (alarmEnabled == FALSE){
+            if (alarmEnabled == FALSE){ // st because it will reset
                 alarmEnabled = TRUE;
                 alarm(RECEIVE_TIMEOUT);
             }
             
-            bytes_read = read(fd, &incoming_byte, 1);
+            n_bytes = read(fd, &incoming_byte, 1);
 
-
-            if (confirm_frame(&SM_llopen, incoming_byte, CONTROL_SET) == 1){
+        
+            st = confirm_frame_control(&SM_llopen, incoming_byte, CONTROL_SET);
+            #ifdef DEBUG_llopen
+            printf("llopen as transmitter, st: %d\n", st);
+            #endif
+            
+            
+            if (st == 15){
                 #ifdef DEBUG_llopen
-                printf("Incoming from transmitter\n");
-                for (int i = 0; i < bytes_read; i++){
-                    printf("%02x\n", buf_receive[i]);
-                    if(i != 0 && buf_receive[i] == 0x7e) break;
-                }
-                printf("End of incoming from transmitter\n");
+                printf("Received UA\n");
                 #endif
                 break;
             }
         }
         reset_alarm();
 
-        if (bytes_read <= 0){
-            #ifdef DEBUG_llopen 
-            printf("No response from transmitter\n"); 
+        if(st != 15){
+            #ifdef DEBUG_llopen
+            printf("Error: llopen as receiver failed. Reached timeout at %d seconds. SET frame never identified\n", RECEIVE_TIMEOUT);
             #endif
             return -1;
         }
 
-        if(confirm_frame_control(buf_receive, CONTROL_SET) != 1){
-            #ifdef DEBUG_llopen 
-            printf("Invalid frame\n"); 
-            #endif
-            return -1;
-        } else {
-            setFrame_UA(buf);
 
-            #ifdef DEBUG_llopen 
-            printf("Valid frame, response to transmitter:\n"); 
-            for (int i = 0; i < BUF_SIZE; i++){
-                printf("%02x\n", buf[i]);
-                if(i != 0 && buf[i] == 0x7e) break;
-            }
-            printf("End of response to transmitter\n");
-            #endif
-
-            write(fd, buf, BUF_SIZE);
-            
-            #ifdef DEBUG_llopen 
-            printf("Frame sent\n"); 
-            #endif
-        }
+        setFrame_UA(buf);
+        write(fd, buf, SUPERV_FRAME_SIZE);
+        
 
     } else {
         printf("Incorrect program usage\n");
@@ -267,7 +277,7 @@ int llread(int fd, u_int8_t* buf, int length){
 
             case A_RCV:
                 #ifdef DEBUG_llread
-                printf("A_RCV state\n");
+                printf("A_RCV state, incoming_byte: %02x\n", incoming_byte);
                 #endif
                 if(incoming_byte == CONTROL_FRAME_0 || incoming_byte == CONTROL_FRAME_1){
                     state = C_RCV;
@@ -429,6 +439,10 @@ int llclose(int fd){
     (void)signal(SIGALRM, alarmHandler);
     u_int8_t buf[BUF_SIZE] = {0};
     u_int8_t buf_retrieve[BUF_SIZE] = {0};
+
+    READ_STATE SM_llclose = START;
+
+    int incoming_byte = 0;
     int bytes_read = 0;
 
     if(ll.status == TRANSMITTER){
@@ -440,7 +454,7 @@ int llclose(int fd){
         setFrame_DISC(buf);
         send_frame(buf, buf_retrieve, ll.numTransmissions, ll.timeout, fd); // Send DISC frame and wait for DISC
         
-        if(confirm_frame_control(buf_retrieve, CONTROL_DISC) == -1){ // Check if DISC was received correctly
+        if(confirm_frame_control(&SM_llclose, incoming_byte, CONTROL_DISC) == -1){ // Check if DISC was received correctly
             printf("DISC not received\n");
             return -1; // If not, return -1
         }
@@ -465,7 +479,7 @@ int llclose(int fd){
                 alarm(RECEIVE_TIMEOUT);
             }
             bytes_read = read(fd, buf, BUF_SIZE);
-            if (bytes_read > 0 && confirm_frame_control(buf, CONTROL_DISC) == 1){ // Check if DISC was received correctly
+            if (bytes_read > 0 && confirm_frame_control(&SM_llclose, incoming_byte, CONTROL_DISC) == 1){ // Check if DISC was received correctly
                 break;
             }
         }
@@ -783,114 +797,13 @@ int confirm_header(u_int8_t* receiver_buf){
     return -1;
 }
 
-int confirm_frame_control(u_int8_t* receiver_buf, u_int8_t control){
 
-    READ_STATE read_state;
-    read_state = START;
-    int ret = -1;
-    for(int j = 0; j < BUF_SIZE; j++){
-        switch(read_state){
-            case START:
-                if(receiver_buf[j]== FLAG){
-                    read_state= FLAG_RCV;
-                }
-                else read_state=START;
-                break;
-            case FLAG_RCV:
-                if((receiver_buf[j] == ADDRESS_RECV && control == CONTROL_DISC) || (receiver_buf[j] == ADDRESS_RECV && control == CONTROL_SET) || (receiver_buf[j] == ADDRESS_EMIT && control == CONTROL_UA)){
-                    read_state=A_RCV;
-                }
-                else if(receiver_buf[j]== FLAG){
-                    read_state=FLAG_RCV;                
-                }
-                else read_state= START;
-                break;
-            case A_RCV:
-                if(receiver_buf[j] == control){
-                    read_state = C_RCV;
-                }
-                else if(receiver_buf[j]== FLAG){
-                    read_state=FLAG_RCV;                
-                }
-                else {read_state= START;}
-                break;
-            
-            case C_RCV:
-                if(receiver_buf[j] == (receiver_buf[1] ^ receiver_buf[2])){
-                    read_state = BCC_OK;
-                }
-                else if(receiver_buf[j]== FLAG){
-                    read_state=FLAG_RCV;                
-                }
-                else read_state= START;
-                break;
-            case BCC_OK:
-                if(receiver_buf[j] == FLAG){
-                    read_state=STP;
-                }
-                else read_state= START;
-                break;
-            case STP:
-                ret = 1;
-        }
-    }
-    return ret;
-}
-
-// int confirm_frame(u_int8_t* receiver_buf, u_int8_t* control){
-//     READ_STATE read_state;
-//     read_state = START;
-//     int ret = -1;
-//     for(int j = 0; j < BUF_SIZE; j++){
-//         switch(read_state){
-//             case START:
-//                 if(receiver_buf[j]== FLAG){
-//                     read_state= FLAG_RCV;
-//                 }
-//                 else read_state=START;
-//                 break;
-//             case FLAG_RCV:
-//                 if(receiver_buf[j] == 0x01){
-//                     read_state=A_RCV;
-//                 }
-//                 else if(receiver_buf[j]== FLAG){
-//                     read_state=FLAG_RCV;                
-//                 }
-//                 else read_state= START;
-//                 break;
-//             case A_RCV:
-//                 if(receiver_buf[j] == *control){
-//                     read_state = C_RCV;
-//                 }
-//                 else if(receiver_buf[j]== FLAG){
-//                     read_state=FLAG_RCV;                
-//                 }
-//                 else read_state= START;
-//                 break;
-//             case C_RCV:
-//                 if(receiver_buf[j] == (0x01 ^ 0x07)){
-//                     read_state = BCC_OK;
-//                 }
-//                 else if(receiver_buf[j]== FLAG){
-//                     read_state=FLAG_RCV;                
-//                 }
-//                 else read_state= START;
-//                 break;
-//             case BCC_OK:
-//                 if(receiver_buf[j] == FLAG){
-//                     read_state=STP;
-//                 }
-//                 else read_state= START;
-//                 break;
-//             case STP:
-//                 ret = 1;
-//         }
-//     }
-//     return ret;
-// }
-
-int confirm_frame(READ_STATE* state_machine, u_int8_t byte, u_int8_t control){
-    int ret = -1;
+int confirm_frame_control(READ_STATE* state_machine, int byte, u_int8_t control){
+    int prev_state = *state_machine;
+    u_int8_t address = (ll.status == TRANSMITTER) ? 0x01 : 0x03;
+    #ifdef DEBUG_confirm_frame_control
+    printf("DEBUG CONF_FM_CTRL -> SM: %d, byte: %02x\n", *state_machine, byte);
+    #endif
     switch(*state_machine){
         case START:
             if(byte == FLAG){
@@ -899,7 +812,7 @@ int confirm_frame(READ_STATE* state_machine, u_int8_t byte, u_int8_t control){
             else *state_machine = START;
             break;
         case FLAG_RCV:
-            if(byte == 0x01){
+            if(byte == address){
                 *state_machine=A_RCV;
             }
             else if(byte == FLAG){
@@ -917,7 +830,7 @@ int confirm_frame(READ_STATE* state_machine, u_int8_t byte, u_int8_t control){
             else *state_machine = START;
             break;
         case C_RCV:
-            if(byte == (0x01 ^ 0x07)){
+            if(byte == (address ^ control)){
                 *state_machine = BCC_OK;
             }
             else if(byte == FLAG){
@@ -928,11 +841,20 @@ int confirm_frame(READ_STATE* state_machine, u_int8_t byte, u_int8_t control){
         case BCC_OK:
             if(byte == FLAG){
                 *state_machine=STP;
+                return 15;
             }
             else *state_machine= START;
             break;
         case STP:
-            ret = 1;
+            return 15;
     }
-    return ret;
+
+    if(prev_state > *state_machine){
+        return prev_state - *state_machine;
+    }
+    return *state_machine;
+}
+
+int confirm_frame(READ_STATE* state_machine, u_int8_t byte, u_int8_t control){
+    return 1;
 }

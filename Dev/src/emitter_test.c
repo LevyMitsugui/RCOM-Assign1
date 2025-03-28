@@ -28,13 +28,19 @@ int main(int argc, char *argv[]){
     // buf[8] = 0x7d;
     // buf[11] = 0x7e;
 
+    
+
+    al.fileDescriptor = llopen(argv[1], TRANSMITTER);
+    if(al.fileDescriptor < 0){
+        printf("Error opening serial port\n");
+        return -1;
+    }
+
+    written_bytes = llwrite(al.fileDescriptor, buf, PACK_SIZE);
     printf("Application Layer sent: \n");
     for(int i = 0; i < PACK_SIZE; i++){
         printf("%02x\n", buf[i]);
     }
-
-    al.fileDescriptor = llopen(argv[1], TRANSMITTER);
-    written_bytes = llwrite(al.fileDescriptor, buf, PACK_SIZE);
     printf("Application Layer: %d bytes written\n", written_bytes);
 
     llclose(al.fileDescriptor);

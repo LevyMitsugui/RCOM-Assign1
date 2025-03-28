@@ -91,7 +91,7 @@ int setFrame_DATA(u_int8_t* buf, u_int8_t* data_packet, uid_t packet_size, u_int
 
 int confirm_header(u_int8_t* receiver_buf);
 
-int confirm_frame_control(u_int8_t* receiver_buf, u_int8_t control);
+int confirm_frame_control(READ_STATE* state_machine, int byte, u_int8_t control);
 
 //int confirm_frame(u_int8_t* receiver_buf, u_int8_t* control);
 int confirm_frame(READ_STATE* state_machine, u_int8_t byte, u_int8_t control);
