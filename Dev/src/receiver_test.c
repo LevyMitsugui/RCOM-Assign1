@@ -23,32 +23,22 @@ int main(int argc, char *argv[]){
     }
     
     u_int8_t incoming_bytes[BUF_SIZE] = {0};
-    int bytes_read = llread(al.fileDescriptor, incoming_bytes, BUF_SIZE);
-    printf("Application Layer, Received %d bytes\n", bytes_read);
-    if (bytes_read < 0)
-    {
-        printf("Error in llread\n");
-        return -1;
-    }
+    int bytes_read = 0;
+    int counter = 0;
 
-    printf("Application Layer, Received: \n");
-    for(int i = 0; i < bytes_read; i++){
-        printf("%02x\n", incoming_bytes[i]);
-    }
-
-
-    for(int j=0; j<8; j++){
+    while(bytes_read >= 0){
         bytes_read = llread(al.fileDescriptor, incoming_bytes, BUF_SIZE);
-        printf("Application Layer, Received %d bytes\n", bytes_read);
-        if (bytes_read < 0)
+        if (bytes_read <= 0)
         {
             printf("Error in llread\n");
             return -1;
         }
+        printf("Cycle %d of Application Layer, Received %d bytes\n", counter, bytes_read);
         printf("Application Layer, Received: \n");
         for(int i = 0; i < bytes_read; i++){
             printf("%02x\n", incoming_bytes[i]);
         }
+        counter++;
     }
 
     llclose(al.fileDescriptor);
