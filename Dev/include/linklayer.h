@@ -51,9 +51,22 @@ typedef struct{
     unsigned int numTransmissions; /*Number of retries in case of
     failure*/
     char frame[BUF_SIZE]; /*Frame*/
-} linkLayer;
-
-typedef enum { START, FLAG_RCV, A_RCV, C_RCV, C_FRAME_0, C_FRAME_1, BCC_OK, BCC2 , DATA, DATA_DESTUFF , SEND ,STP} READ_STATE;
+} linkLayer;                    //     # state without byte validation       
+                                //   |   | * States that might give response
+typedef enum { START,           // 0 |   |
+               FLAG_RCV,        // 1 |   |
+               A_RCV,           // 2 |   | * duplicated byte
+               C_RCV,           // 3 |   | * unexpected control signal
+               BCC_OK,          // 4 |   |
+               BCC2,            // 5 | # |
+               DATA,            // 6 |   |
+               DATA_DESTUFF,    // 7 |   | * unexpected byte for destuffing
+               END,             // 8 |   |
+               STP,             // 9 | # | * ready for next byte
+                                //   |   | 
+               SET,             //10 |   | 
+               ACK              //11 | # | 
+            } READ_STATE;  
 
 extern linkLayer ll;
 
@@ -76,6 +89,8 @@ int destuff_bytes(u_int8_t* orig, u_int8_t* target, uid_t init_index, uid_t fina
 int stuff_bytes(u_int8_t* data_packet, u_int8_t* buf, uid_t packet_size, uid_t offset);
 
 u_int8_t array_xor(u_int8_t* array, int arr_size, uid_t init_index, uid_t final_index);
+
+void setFrame_control(u_int8_t* buf, u_int8_t control);
 
 void setFrame_SET(u_int8_t* buf);
 

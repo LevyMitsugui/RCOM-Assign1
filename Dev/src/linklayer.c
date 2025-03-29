@@ -6,15 +6,16 @@
 // #define DEBUG_llwrite
 // #define DEBUG_llread
 #define DEBUG_llread2
-// #define DEBUG_send_frame
+// #define DEBUG_llwrite
+#define DEBUG_send_frame
 // #define DEBUG_setFrame_DATA
 // #define DEBUG_array_xor
 // #define DEBUG_stuff_bytes
 // #define DEBUG_destuff_bytes
 // #define DEBUG_llread
-// #define DEBUG_llwrite
 //#define DEBUG_confirm_frame_control
 
+//TODO code does not discard duplicated frames, it seems to only be able to notice half the duplicate bytes
 
 
 enum llread_state {READ, CONF_HEADER, DESTUFF, CONF_DATA, RESPOND, FINISH_READ};
@@ -94,8 +95,7 @@ int llopen(const char *port, int role){
     //--- --- --- --- --- --- ---
 
     alarmCount = 0;
-    u_int8_t buf[BUF_SIZE] = {0};
-    u_int8_t buf_receive[BUF_SIZE] = {0};
+    u_int8_t buf[SUPERV_FRAME_SIZE] = {0};
     u_int8_t incoming_byte = 0;
 
     READ_STATE SM_llopen = READ;
@@ -105,6 +105,7 @@ int llopen(const char *port, int role){
     int STOP = FALSE;
 
     if (ll.status == TRANSMITTER){ //send SET and wait for UA
+        tcflush(fd, TCIOFLUSH);
         setFrame_SET(buf);
         
         //bytes = write(fd, buf, SUPERV_FRAME_SIZE);
@@ -133,13 +134,6 @@ int llopen(const char *port, int role){
             printf("llopen as transmitter, st: %d\n", st);
             #endif
             
-            if (st > 0){
-                alarm(0);
-                alarmEnabled = FALSE;
-            } else if (st < 0){
-                alarm(TRANSMIT_TIMEOUT);
-                alarmEnabled = TRUE;
-            }
             if (st == 15){
                 #ifdef DEBUG_llopen
                 printf("Received UA\n");
@@ -239,16 +233,20 @@ int llread(int fd, u_int8_t* buf, int length){
     u_int8_t bcc2_received = 0;
 
     // data bytes will be directly stored in the buffer buf (parameter of the function)
+    
+    tcflush(fd, TCIOFLUSH); // flushes the underlying buffer so discard any previous, unwanted data
 
 
     while(STOP == FALSE){
         prev_byte = incoming_byte;
         
         bytes_read = read(fd, &incoming_byte, 1);
-        if(bytes_read <= 0) continue;
 
+        if(bytes_read <= 0){continue;}
+        
         #ifdef DEBUG_llread2
-        printf("Current STATE: %d, incoming_byte: %02x\n", state, incoming_byte);
+        printf("\nCurrent STATE: %d\n", state);
+        printf("incoming byte: %02x\n", incoming_byte);
         #endif
 
         frame_length++;
@@ -263,7 +261,7 @@ int llread(int fd, u_int8_t* buf, int length){
                 } else {
                     state = START;
                 }
-                break;
+            break;
 
             case FLAG_RCV:
                 #ifdef DEBUG_llread
@@ -279,15 +277,34 @@ int llread(int fd, u_int8_t* buf, int length){
                     state = START;
                 }
 
-                break;
+            break;
 
             case A_RCV:
                 #ifdef DEBUG_llread
                 printf("A_RCV state, incoming_byte: %02x\n", incoming_byte);
                 #endif
+                
+                if(incoming_byte == 0x00 && ll.sequenceNumber == 0 ||
+                   incoming_byte == 0x40 && ll.sequenceNumber ==1){ // Duplicated Byte
+                    
+                    ctrl_send = (ll.sequenceNumber == 0) ? CONTROL_RR1 : CONTROL_RR0;
+                    setFrame_control(buf_send, ctrl_send);
+                    write(fd, buf_send, SUPERV_FRAME_SIZE);
+
+                    #ifdef DEBUG_llread2
+                    printf("Duplicated Frame\n");
+                    #endif
+
+                    state = START;
+                    break;
+                }
+
                 if(incoming_byte == CONTROL_FRAME_0 || incoming_byte == CONTROL_FRAME_1){
                     state = C_RCV;
                     control_received = incoming_byte;
+                } else if(incoming_byte == CONTROL_SET){ // Retransmission of SET (that means the transmitter did not receive the UA frame)
+                    state = SET;
+                    control_received == incoming_byte;
                 } else if(incoming_byte == FLAG){
                     state = FLAG_RCV;
                 } else {
@@ -295,34 +312,36 @@ int llread(int fd, u_int8_t* buf, int length){
                 }
 
 
-                break;
+            break;
 
             case C_RCV:
                 #ifdef DEBUG_llread
-                printf("C_FRAME_0 state\n");
+                printf("C_RCV state\n");
+                #endif
+                #ifdef DEBUG_llread2
+                printf("bcc1_received: %02x\n", incoming_byte);
+                printf("bcc1 calculated: %02x ^ %02x = %02x\n", address_received, control_received, address_received ^ control_received);
                 #endif
                 if(incoming_byte == address_received ^ control_received){
                     
                     #ifdef DEBUG_llread
                     printf("BCC1 is correct\n");
                     #endif
-                    
+                    buf_index = 0;
                     state = DATA; // Goes directly to data destuffing and storage becaue BCC1 is correct
                     bcc1_received = incoming_byte; //TODO pode-se apagar isso.
                 
                 } else if(incoming_byte == FLAG){
                     state = FLAG_RCV;
                 } else {
+                    ctrl_send = (control_received == 0) ? CONTROL_RR1 : CONTROL_RR0;
+                    setFrame_control(buf_send, ctrl_send);
+                    write(fd, buf_send, SUPERV_FRAME_SIZE);
+
                     state = START;
                 }
 
-                if(control_received == CONTROL_FRAME_0){
-                    ctrl_send = CONTROL_RR1;
-                } else if(control_received == CONTROL_FRAME_1){
-                    ctrl_send = CONTROL_RR0;
-                }
-
-                break;
+            break;
 
             case DATA:
                 #ifdef DEBUG_llread
@@ -337,7 +356,7 @@ int llread(int fd, u_int8_t* buf, int length){
                     buf[buf_index] = incoming_byte;
                     buf_index+=1;
                 }
-                break;
+            break;
 
             case DATA_DESTUFF:
                 #ifdef DEBUG_llread
@@ -352,13 +371,81 @@ int llread(int fd, u_int8_t* buf, int length){
                     buf[buf_index] = 0x7d;
                     buf_index+=1;
                     state = DATA;
-                } else { // SOMETHING WENT WRONG. DROP IT. AND REJ
-                    state = STP; // TODO Make it send a REJ supervision Frame
-                    
-                }
-                break;
+                } else { // SOMETHING WENT WRONG. DROP IT AND REJ
 
+                    ctrl_send = (buf[2] == CONTROL_FRAME_0) ? CONTROL_REJ0 : CONTROL_REJ1;
+                    setFrame_control(buf_send, ctrl_send);
+                    write(fd, buf_send, SUPERV_FRAME_SIZE);
+
+                    state = START;
+                }
+            break;
+
+            // case BCC2:
+            //     #ifdef DEBUG_llread
+            //     printf("BCC2 state\n");
+            //     #endif  
+            //     bcc2_received = buf[buf_index-1];
+            //     bcc2 = array_xor(buf, buf_index-1, 0, buf_index-2);
+
+            //     #ifdef DEBUG_llread2
+            //     printf("bcc2_received: %02x\n", bcc2_received);
+            //     printf("bcc2 calculated: %02x\n", bcc2);
+            //     #endif
+                
+            //     if(bcc2 == bcc2_received){
+            //         state = STP;
+            //     } else {
+            //         state = DATA;
+            //     }
+
+            // break;   
+
+            // case STP:
+            //     #ifdef DEBUG_llread
+            //     printf("STOP state\n");
+            //     #endif
+
+                
+            //     data_length = buf_index-1;
+            //     buf_index = 0;
+
+            //     ctrl_send = (control_received == 0x00) ? CONTROL_RR1 : CONTROL_RR0;
+            //     setFrame_control(buf_send, ctrl_send);
+            //     write(fd, buf_send, SUPERV_FRAME_SIZE);
+
+            //     ll.sequenceNumber = (ll.sequenceNumber == 0) ? 1 : 0;
+            //     STOP = TRUE;
+            // break;
+
+
+            case SET:
+                if(incoming_byte == address_received ^ control_received){
+                    state = ACK;
+                } else if (incoming_byte == FLAG){
+                    state = FLAG_RCV;
+                } else {
+                    state = START;
+                }
+            break;
+
+            // case ACK:
+            //     ctrl_send = CONTROL_UA;
+            //     setFrame_control(buf_send, ctrl_send);
+            //     write(fd, buf_send, SUPERV_FRAME_SIZE);
+
+            //     state = START;
+            // break;
+
+        }
+
+        // NOT IDEAL FIX BUT IT IS A FIX // TODO Finde a better way
+        // This was done to guarantee immediate action from the state machine. It avoids cycles without incoming_byte validation
+        switch(state){
             case BCC2:
+                #ifdef DEBUG_llread2
+                printf("2nd switch Next STATE: %d\n", state);
+                #endif
                 #ifdef DEBUG_llread
                 printf("BCC2 state\n");
                 #endif  
@@ -375,22 +462,51 @@ int llread(int fd, u_int8_t* buf, int length){
                 } else {
                     state = DATA;
                 }
+            break;
 
-                break;    
             case STP:
+                #ifdef DEBUG_llread2
+                printf("2nd switch Next STATE: %d\n", state);
+                #endif
                 #ifdef DEBUG_llread
                 printf("STOP state\n");
                 #endif
                 data_length = buf_index-1;
-                ll.sequenceNumber = (ll.sequenceNumber + 1) % 2;
-                STOP = TRUE;
-                break;
+                #ifdef DEBUG_llread2
+                printf("buf_index: %d, data_length: %d\n", buf_index, data_length);
+                #endif
+                buf_index = 0;
 
+                ctrl_send = (control_received == 0x00) ? CONTROL_RR1 : CONTROL_RR0;
+                setFrame_control(buf_send, ctrl_send);
+                write(fd, buf_send, SUPERV_FRAME_SIZE);
+
+                ll.sequenceNumber = (ll.sequenceNumber == 0) ? 1 : 0;
+                state = START;
+                STOP = TRUE;
+            break;
+
+            case ACK:
+                #ifdef DEBUG_llread2
+                printf("2nd switch Next STATE: %d\n", state);
+                #endif
+                ctrl_send = CONTROL_UA;
+                setFrame_control(buf_send, ctrl_send);
+                write(fd, buf_send, SUPERV_FRAME_SIZE);
+
+                state = START;
+            break;
         }
+
+        
+
         #ifdef DEBUG_llread2
         printf("Next STATE: %d\n", state);
         #endif
     }  
+    #ifdef DEBUG_llread2
+    printf("Exiting llread\n");
+    #endif
     return data_length;
 }
 
@@ -559,6 +675,8 @@ int send_frame(u_int8_t*sender_buf, u_int8_t* incoming_byte, uid_t attempts, uid
     }
     #endif
 
+    tcflush(fd, TCIOFLUSH);
+
     while (alarmCount < attempts){
 
         #ifdef DEBUG_send_frame
@@ -571,6 +689,8 @@ int send_frame(u_int8_t*sender_buf, u_int8_t* incoming_byte, uid_t attempts, uid
             if(alarmCount == 0){
                 printf("Sending frame\n");
             }
+
+            for(int i=0; i<BUF_SIZE; printf("buf_send[%d]: %02x\n", i, sender_buf[i++]));
             #endif
             
             write(fd, sender_buf, BUF_SIZE);
@@ -682,7 +802,6 @@ u_int8_t array_xor(u_int8_t* array, int arr_size, uid_t init_index, uid_t final_
     printf("DEBUG: array_xor\n");
     #endif
 
-    //printf("final_index: %d, BUF_SIZE: %d\n", final_index, BUF_SIZE); // TODO remove this later
     if(final_index >= BUF_SIZE){
         printf("array_xor: Index out of bounds\n"); return 0;
     }
@@ -701,6 +820,14 @@ u_int8_t array_xor(u_int8_t* array, int arr_size, uid_t init_index, uid_t final_
     #endif
     return ret_xor;
 }
+
+void setFrame_control(u_int8_t* buf, u_int8_t control){
+    buf[0] = FLAG;
+    buf[1] = ADDRESS_RECV;
+    buf[2] = control;
+    buf[3] = buf[1]^control; 
+    buf[4] = FLAG;
+} 
 
 void setFrame_SET(u_int8_t* buf){
     buf[0] = FLAG;

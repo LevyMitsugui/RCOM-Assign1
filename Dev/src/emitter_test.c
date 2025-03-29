@@ -18,22 +18,28 @@ int main(int argc, char *argv[]){
 
     ll = create_link_layer(argv[1], BAUDRATE, TRANSMIT_TIMEOUT, MAX_TRANSMISSION_ATTEMPTS);
 
-    u_int8_t buf[16] = {0};
+    u_int8_t buf[PACK_SIZE] = {0};
+    int incoming_byte = 0;
 
     for(int i = 0; i < PACK_SIZE; i++){
         buf[i] = i;
     }
 
-    // buf[0] = 0x7e;
-    // buf[1] = 0x03;
-    // buf[2] = 0x00;
-    // buf[3] = 0x03;
-    // buf[4] = 0x01;
-    // buf[5] = 0x02;
-    // buf[6] = 0x03;
-    // buf[7] = 0x04;
-    // buf[8] = 0x04;
-    // buf[9] = 0x7e;
+    buf[0] = 0x7e;
+    buf[1] = 0x03;
+    buf[2] = 0x00;
+    buf[3] = 0x03;
+    buf[4] = 0x01;
+    buf[5] = 0x02;
+    buf[6] = 0x03;
+    buf[7] = 0x04;
+    buf[8] = 0x04;
+    buf[9] = 0x7e;
+
+
+    // buf[5] = 0x7d;
+    // buf[6] = 0x7d;
+    // buf[7] = 0x7e;
 
     
 
@@ -42,14 +48,43 @@ int main(int argc, char *argv[]){
         printf("Error opening serial port\n");
         return -1;
     }
+    sleep(3);
 
-    //write(al.fileDescriptor, buf, PACK_SIZE);
-    written_bytes = llwrite(al.fileDescriptor, buf, PACK_SIZE);
-    printf("Application Layer sent: \n");
-    for(int i = 0; i < PACK_SIZE; i++){
-        printf("%02x\n", buf[i]);
-    }
+    written_bytes = write(al.fileDescriptor, buf, PACK_SIZE);
+
+    // written_bytes = llwrite(al.fileDescriptor, buf, PACK_SIZE);
+    // printf("Application Layer sent: \n");
+    // for(int i = 0; i < PACK_SIZE; i++){
+    //     printf("%02x\n", buf[i]);
+    // }
     printf("Application Layer: %d bytes written\n", written_bytes);
+
+    for(int j=0; j<8; j++){
+    sleep(2);
+    buf[0] = 0x7e;
+    buf[1] = 0x03;
+    buf[2] = 0x40;
+    buf[3] = 0x01;//0x43;
+    buf[4] = 0x01;
+    buf[5] = 0x02;
+    buf[6] = 0x03;
+    buf[7] = 0x04;
+    buf[8] = 0x04;
+    buf[9] = 0x7e;
+    written_bytes = write(al.fileDescriptor, buf, PACK_SIZE);
+    // written_bytes = llwrite(al.fileDescriptor, buf, PACK_SIZE);
+    // printf("Application Layer sent: \n");
+    // for(int i = 0; i < PACK_SIZE; i++){
+    //     printf("%02x\n", buf[i]);
+    // }
+
+    printf("Application Layer: %d bytes written\n", written_bytes);
+    }
+
+    for(int i = 0; i<100; i++){
+        read(al.fileDescriptor, &incoming_byte, 1);
+        printf("readin[%d]: %02x\n", i, incoming_byte);
+    }
 
     llclose(al.fileDescriptor);
 
