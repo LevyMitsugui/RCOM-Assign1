@@ -245,7 +245,8 @@ int llread(int fd, u_int8_t* buf, int length){
         
         #ifdef DEBUG_llread2
         printf("\nSeqNum: %d, Current STATE: %d\n", ll.sequenceNumber, state);
-        printf("incoming byte: %02x\n", incoming_byte);
+        if(should_read)
+            printf("incoming byte: %02x\n", incoming_byte);
         #endif
 
         frame_length++;
@@ -358,6 +359,14 @@ int llread(int fd, u_int8_t* buf, int length){
                 } else {
                     buf[buf_index] = incoming_byte;
                     buf_index+=1;
+
+                    #ifdef DEBUG_llread2
+                    printf("buf: ");
+                    for(int i=0 ; i<buf_index ; i++){
+                        printf(" %02x ", buf[i]);
+                    }
+                    printf("\n");
+                    #endif
                 }
             break;
 
@@ -370,10 +379,26 @@ int llread(int fd, u_int8_t* buf, int length){
                     buf[buf_index] = 0x7e;
                     buf_index+=1;
                     state = DATA;
+
+                    #ifdef DEBUG_llread2
+                    printf("buf: ");
+                    for(int i=0 ; i<buf_index ; i++){
+                        printf(" %02x ", buf[i]);
+                    }
+                    printf("\n");
+                    #endif
                 } else if(incoming_byte == 0x5d){
                     buf[buf_index] = 0x7d;
                     buf_index+=1;
                     state = DATA;
+
+                    #ifdef DEBUG_llread2
+                    printf("buf: ");
+                    for(int i=0 ; i<buf_index ; i++){
+                        printf(" %02x ", buf[i]);
+                    }
+                    printf("\n");
+                    #endif
                 } else { // SOMETHING WENT WRONG. DROP IT AND REJ
 
                     ctrl_send = (control_received == CONTROL_FRAME_0) ? CONTROL_REJ0 : CONTROL_REJ1;
@@ -483,11 +508,6 @@ int llwrite(int fd, u_int8_t* buf, int length){
     u_int8_t control = 0;
 
     READ_STATE SM_llclose = START;
-
-    // do{
-    //     bytes_read = send_frame(buf_send, buf_retrieve, ll.numTransmissions, ll.timeout, fd);
-    //     attempts++;
-    // } while (attempts < ll.numTransmissions && (confirm_frame_control(buf_retrieve, &control) == -1 || bytes_read <= 0));
 
     //while(1){
         bytes_read = send_frame(buf_send, buf_retrieve, ll.numTransmissions, ll.timeout, fd);

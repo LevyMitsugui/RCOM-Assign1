@@ -31,32 +31,33 @@ int main(int argc, char *argv[]){
 
     for(int j=0; j<3; j++){
         sleep(3);
-        buf[0] = 0x7e;
-        buf[1] = 0x03;
-        buf[2] = (j%2 == 0) ? 0x00 : 0x40;
-        buf[3] = buf[1] ^ buf[2];
-        
-        bcc2 = 0;
-        for(int i = 4; i<PACK_SIZE-2; i++){
-            buf[i] = (i-3) + (16*j);
-            bcc2 ^= buf[i];
-        }
-        
-        // buf[4] = 0x01;
-        // buf[5] = 0x02;
-        // buf[6] = 0x03;
-        // buf[7] = 0x04;
-        // buf[8] = 0x04;
-        // buf[9] = 0x05;
-        // buf[10] = 0x06;
-        // buf[11] = 0x07;
-        // buf[12] = 0x08;
-        // buf[13] = 0x09;
+        // buf[0] = 0x7e;
+        // buf[1] = 0x03;
+        // buf[2] = (j%2 == 0) ? 0x00 : 0x40;
+        // buf[3] = buf[1] ^ buf[2]; 
+        // bcc2 = 0;
+        // for(int i = 4; i<PACK_SIZE-2; i++){
+        //     buf[i] = (i-3) + (16*j);
+        // }
+        // buf[6]= 0x7d; 
+        // buf[7] = 0x5e;
+        // for(int i = 4; i<PACK_SIZE-2; i++){
+        //     bcc2 ^= buf[i];
+        // } 
+        // if (bcc2 == 0x7e || bcc2 == 0x7d){
+        //     printf("TEST WITH OTHER VALUES\n");
+        //     return 0;
+        // }
+        // buf[PACK_SIZE-2] = bcc2;
+        // buf[PACK_SIZE-1] = 0x7e;
+        // written_bytes = write(al.fileDescriptor, buf, PACK_SIZE);
 
-        buf[PACK_SIZE-2] = bcc2;
-        buf[PACK_SIZE-1] = 0x7e;
-        written_bytes = write(al.fileDescriptor, buf, PACK_SIZE);
-        //written_bytes = llwrite(al.fileDescriptor, buf, PACK_SIZE);
+
+        for(int i = 0; i < PACK_SIZE; i++){
+            buf[i] = i + (16*j);
+        }
+
+        written_bytes = llwrite(al.fileDescriptor, buf, PACK_SIZE);
         printf("Application Layer: %d bytes written\n", written_bytes);
         printf("Application Layer sent: \n");
         for(int i = 0; i < PACK_SIZE; i++){
