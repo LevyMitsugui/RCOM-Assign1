@@ -1,6 +1,6 @@
 #include "linklayer.h"
 
-#define PACK_SIZE 10
+#define PACK_SIZE 5
 
 struct applicationLayer {
     int fileDescriptor; /*Serial port descriptor*/
@@ -19,6 +19,7 @@ int main(int argc, char *argv[]){
     ll = create_link_layer(argv[1], BAUDRATE, TRANSMIT_TIMEOUT, MAX_TRANSMISSION_ATTEMPTS);
 
     u_int8_t buf[PACK_SIZE] = {0};
+    u_int8_t buf_send[BUF_SIZE] = {0};
     u_int8_t bcc2 = 0;
     int incoming_byte = 0; 
 
@@ -29,8 +30,8 @@ int main(int argc, char *argv[]){
     }
     sleep(0.5);
 
-    for(int j=0; j<3; j++){
-        sleep(3);
+    for(int j=0; j<8; j++){
+        sleep(1);
         // buf[0] = 0x7e;
         // buf[1] = 0x03;
         // buf[2] = (j%2 == 0) ? 0x00 : 0x40;
@@ -53,17 +54,23 @@ int main(int argc, char *argv[]){
         // written_bytes = write(al.fileDescriptor, buf, PACK_SIZE);
 
 
+        // written_bytes = llwrite(al.fileDescriptor, buf, PACK_SIZE);
+
         for(int i = 0; i < PACK_SIZE; i++){
-            buf[i] = i + (16*j);
+            buf[i] = j;
         }
 
-        written_bytes = llwrite(al.fileDescriptor, buf, PACK_SIZE);
+        buf[3] = 0x7e;
+        buf[4] = 0x7d;
+
+        int frame_size = setFrame_DATA(buf_send, buf, PACK_SIZE, (j%2 == 0) ? 0x00 : 0x40);
+        printf("Full frame: ");
+        for(int i = 0; i < frame_size; i++){
+            printf("%02x ", buf_send[i]);
+        } printf("\n");
+        written_bytes = write(al.fileDescriptor, buf_send, frame_size);
+
         printf("Application Layer: %d bytes written\n", written_bytes);
-        printf("Application Layer sent: \n");
-        for(int i = 0; i < PACK_SIZE; i++){
-            printf("%02x\n", buf[i]);
-        }
-
     }
 
     for(int i = 0; i<100; i++){

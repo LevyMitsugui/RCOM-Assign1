@@ -82,8 +82,6 @@ int llwrite_test(int fd, u_int8_t* buf, int length);
 
 int llclose(int fd);
 
-int send_frame(u_int8_t*sender_buf, u_int8_t* receiver_buf, uid_t attempts, uid_t timeout, int fd);
-
 int destuff_bytes(u_int8_t* orig, u_int8_t* target, uid_t init_index, uid_t final_index);
 
 int stuff_bytes(u_int8_t* data_packet, u_int8_t* buf, uid_t packet_size, uid_t offset);

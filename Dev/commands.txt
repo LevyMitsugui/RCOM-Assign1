@@ -1,0 +1,8 @@
+gcc -Iinclude src/emitter_test.c src/linklayer.c -o src/emitter_test 
+./src/emitter_test /dev/pts/4
+
+
+gcc -Iinclude src/receiver_test.c src/linklayer.c -o src/receiver_test
+./src/receiver_test /dev/pts/5
+
+socat -d -d pty,raw,echo=0 pty,raw,echo=0
