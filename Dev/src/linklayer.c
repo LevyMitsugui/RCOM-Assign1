@@ -1,19 +1,19 @@
 #include "linklayer.h"
 
 // #define DEBUG 
-//#define DEBUG_llopen
-// #define DEBUG_llclose
+// #define DEBUG_llopen
+#define DEBUG_llclose
 // #define DEBUG_llwrite
 // #define DEBUG_llread
 // #define DEBUG_llread2
-#define DEBUG_llwrite
+// #define DEBUG_llwrite
 // #define DEBUG_send_frame
 // #define DEBUG_setFrame_DATA
 // #define DEBUG_array_xor
 // #define DEBUG_stuff_bytes
 // #define DEBUG_destuff_bytes
 // #define DEBUG_llread
-//#define DEBUG_confirm_frame_control
+#define DEBUG_confirm_frame_control
 
 //TODO code does not discard duplicated frames, it seems to only be able to notice half the duplicate bytes
 
@@ -267,7 +267,7 @@ int llread(int fd, u_int8_t* buf, int length){
                     frame_length = 1;
                     buf_index = 0;
                     state = FLAG_RCV;
-                    alarm(RECEIVE_TIMEOUT);
+                    //alarm(RECEIVE_TIMEOUT);
                 } else {
                     state = START;
                 }
@@ -464,10 +464,8 @@ int llread(int fd, u_int8_t* buf, int length){
                 buf_index = 0;
 
                 ctrl_send = (control_received == 0x00) ? CONTROL_RR1 : CONTROL_RR0;
-                printf("Sending RR frame: %02x ", ctrl_send); // TODO remove
                 setFrame_control(buf_send, ctrl_send);
                 write(fd, buf_send, SUPERV_FRAME_SIZE);
-                printf(" Sequence number: %d\n", ll.sequenceNumber); // TODO remove
                 ll.sequenceNumber = !ll.sequenceNumber;
                 state = START;
                 STOP = TRUE;
@@ -643,7 +641,6 @@ int llwrite(int fd, u_int8_t* buf, int length){
             break;
 
             case STP:
-                printf("We stopped\n");
                 ll.sequenceNumber = !ll.sequenceNumber;
                 // SM_llwrite = START;
                 // should_read = TRUE;
@@ -684,33 +681,63 @@ int llclose(int fd){
         #endif
         
         setFrame_DISC(buf);
-        //send_frame(buf, buf_retrieve, ll.numTransmissions, ll.timeout, fd); // Send DISC frame and wait for DISC
-        
+        while(alarmCount < ll.numTransmissions){
+            if(alarmEnabled == FALSE){
+
+                #ifdef DEBUG_llclose
+                printf("Sending DISC : ");
+                for(int i = 0; i < SUPERV_FRAME_SIZE; i++){
+                    printf("%02x ", buf[i]);
+                } printf("\n");
+                #endif
+
+                write(fd, buf, SUPERV_FRAME_SIZE);
+                alarmEnabled = TRUE;
+                alarm(ll.timeout);
+            }
+            bytes_read = read(fd, &incoming_byte, 1);
+            if (bytes_read > 0 && confirm_frame_control(&SM_llclose, incoming_byte, CONTROL_DISC) == 1){ // Check if DISC was received correctly
+                break;
+            }
+        }
+        reset_alarm();
+        if (bytes_read <= 0){
+            printf("DISC never received or received incorrectly\n");
+            return -1;
+        }
+
         if(confirm_frame_control(&SM_llclose, incoming_byte, CONTROL_DISC) == -1){ // Check if DISC was received correctly
             printf("DISC not received\n");
             return -1; // If not, return -1
         }
 
         setFrame_UA(buf); // As the DISC frame was received correctly, send the UA frame
+
+        #ifdef DEBUG_llclose
+        printf("Sending UA : ");
+        for(int i = 0; i < SUPERV_FRAME_SIZE; i++){
+            printf("%02x ", buf[i]);
+        } printf("\n");
+        #endif
+
         write(fd, buf, BUF_SIZE);
         // Does not check if the UA frame was received correctly
 
     } else if (ll.status == RECEIVER){
-        reset_alarm();
-        while(alarmCount < ll.numTransmissions){ // Wait for DISC
-            
-            #ifdef DEBUG
-            if (alarmCount == 0){
-                printf("Waiting for DISC\n");
-            }
-            #endif
-            
-            
-            if (alarmEnabled == FALSE){
-                alarmEnabled = TRUE;
-                alarm(RECEIVE_TIMEOUT);
-            }
-            bytes_read = read(fd, buf, BUF_SIZE);
+
+        #ifdef DEBUG_llclose
+        printf("Run llclose as RECEIVER\n");
+        #endif
+
+        alarmEnabled = TRUE;
+        alarm(RECEIVE_TIMEOUT);
+
+        #ifdef DEBUG_llclose
+        printf("Waiting for DISC\n");
+        #endif
+
+        while(alarmEnabled){ // Wait for DISC  
+            bytes_read = read(fd, &incoming_byte, 1);
             if (bytes_read > 0 && confirm_frame_control(&SM_llclose, incoming_byte, CONTROL_DISC) == 1){ // Check if DISC was received correctly
                 break;
             }
@@ -721,14 +748,32 @@ int llclose(int fd){
             printf("DISC never received or received incorrectly\n");
             return -1;
         }
+        setFrame_control(buf, CONTROL_DISC); // As the DISC frame was received correctly, send the UA frame
+        
+        while(alarmCount < ll.numTransmissions){
+            if(alarmEnabled == FALSE){
+                write(fd, buf, SUPERV_FRAME_SIZE);
 
-        setFrame_DISC(buf);
-        //bytes_read = send_frame(buf, buf_retrieve, ll.numTransmissions, ll.timeout, fd);
-    
-        if (bytes_read <= 0){
-            printf("DISC never received\n");
-            return -1;
+                #ifdef DEBUG_llclose
+                printf("Sending DISC : ");
+                for(int i = 0; i < SUPERV_FRAME_SIZE; i++){
+                    printf("%02x ", buf[i]);
+                } printf("\n");
+                #endif
+
+                alarmEnabled = TRUE;
+                alarm(ll.timeout);
+            }
+            bytes_read = read(fd, &incoming_byte, 1);
+            if (bytes_read > 0 && confirm_frame_control(&SM_llclose, incoming_byte, CONTROL_UA) == 1){ // Check if DISC was received correctly
+                break;
+            }
         }
+        reset_alarm();
+        if (bytes_read <= 0){
+            printf("Did not receive UA, quitting eitherway\n");
+        }
+
     }
 
     if (tcsetattr(fd, TCSANOW, &oldtio) == -1)
@@ -816,23 +861,15 @@ void setFrame_SET(u_int8_t* buf){
 
 void setFrame_UA(u_int8_t* buf){
     buf[0] = FLAG;
-    buf[1] = ADDRESS_EMIT;
+    buf[1] = (ll.status == TRANSMITTER) ? ADDRESS_RECV : ADDRESS_EMIT;
     buf[2] = CONTROL_UA;
-    buf[3] = buf[1]^buf[2]; 
-    buf[4] = FLAG;
-}
-
-void setFrame_SUP(u_int8_t* buf, u_int8_t control){
-    buf[0] = FLAG;
-    buf[1] = ADDRESS_EMIT;
-    buf[2] = control;
     buf[3] = buf[1]^buf[2]; 
     buf[4] = FLAG;
 }
 
 void setFrame_DISC(u_int8_t* buf){
     buf[0] = FLAG;
-    buf[1] = ADDRESS_RECV;
+    buf[1] = (ll.status == TRANSMITTER) ? ADDRESS_RECV : ADDRESS_EMIT;
     buf[2] = CONTROL_DISC;
     buf[3] =(buf[1] ^ buf[2]); 
     buf[4] = FLAG;

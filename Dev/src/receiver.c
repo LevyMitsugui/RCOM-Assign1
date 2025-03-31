@@ -2,7 +2,7 @@
 #include <stdio.h>
 
 #define PACK_SIZE 16
-#define MAXIMUM_FILE_SIZE 0x80000//16384
+#define MAXIMUM_FILE_SIZE 0x80000  //16384//for penguin.gif
 #define FILE_NAME "penguin.gif"
 #define PORT "/dev/pts/5"
 
@@ -50,7 +50,7 @@ int main(int argc, char *argv[]) {
         bytes_until_now += bytes_read;
         printf("Cycle %ld of Application Layer, Received %ld bytes\n", cycles, bytes_read);
     }
-    //llclose(al.fileDescriptor);
+    llclose(al.fileDescriptor);
 
     FILE *file = fopen("output.gif", "wb");
     size_t bytes_written = fwrite(buf_file, 1, index_file, file);

@@ -1,9 +1,8 @@
 #include "linklayer.h"
 
 #define PACK_SIZE 250
-//#define FILE_NAME "/mnt/c/Users/Levy/Documents/GitHub/RCOM-Assign1/Dev/src/penguin.gif"
+#define FILE_NAME "/mnt/c/Users/Levy/Documents/GitHub/RCOM-Assign1/Dev/src/penguin.gif"
 //#define FILE_NAME "/mnt/c/Users/Levy/Documents/GitHub/RCOM-Assign1/Dev/src/smol.jpg"
-#define FILE_NAME "/mnt/c/Users/Levy/Documents/GitHub/RCOM-Assign1/Dev/src/fart-gun-purple-el-macho.gif"
 //#define FILE_NAME "C:/Users/Levy/Documents/GitHub/RCOM-Assign1/Dev/src/penguin.gif"
 #define PORT "/dev/pts/4"
 
@@ -53,6 +52,9 @@ int main(int argc, char *argv[]) {
     }
 
     fclose(file_pointer);
+
+    
+    sleep(4);
     llclose(al.fileDescriptor);
 
     return 0;
