@@ -17,12 +17,12 @@
 #define TRANSMITTER 0
 #define RECEIVER 1
 #define BAUDRATE B38400
-#define RECEIVE_TIMEOUT 60 // in seconds
-#define TRANSMIT_TIMEOUT 3
-#define MAX_TRANSMISSION_ATTEMPTS 5
+#define RECEIVE_TIMEOUT 5 // in seconds
+#define TRANSMIT_TIMEOUT 1
+#define MAX_TRANSMISSION_ATTEMPTS 2
 
 #define SUPERV_FRAME_SIZE 5
-#define BUF_SIZE 64 //256
+#define BUF_SIZE 1024
 #define HEADER_SIZE 4
 #define FOOTER_SIZE 2
 //#define PACKET_SIZE BUF_SIZE-HEADER_SIZE-FOOTER_SIZE - 1 // -1 in case the bcc2 is 2 bytes
@@ -78,8 +78,6 @@ int llread(int fd, u_int8_t* buf, int length);
 
 int llwrite(int fd,u_int8_t* buf, int length);
 
-int llwrite_test(int fd, u_int8_t* buf, int length);
-
 int llclose(int fd);
 
 int destuff_bytes(u_int8_t* orig, u_int8_t* target, uid_t init_index, uid_t final_index);
@@ -98,15 +96,10 @@ void setFrame_SUP(u_int8_t* buf, u_int8_t control);
 
 void setFrame_DISC(u_int8_t* buf);
 
-void setFrame_MOCK1(u_int8_t* buf);
-
 int setFrame_DATA(u_int8_t* buf, u_int8_t* data_packet, uid_t packet_size, u_int8_t control);
 
 int confirm_header(u_int8_t* receiver_buf);
 
 int confirm_frame_control(READ_STATE* state_machine, int byte, u_int8_t control);
-
-//int confirm_frame(u_int8_t* receiver_buf, u_int8_t* control);
-int confirm_frame(READ_STATE* state_machine, u_int8_t byte, u_int8_t control);
   
 #endif

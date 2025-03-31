@@ -1,6 +1,6 @@
 #include "linklayer.h"
 
-#define PACK_SIZE 5
+#define PACK_SIZE 8
 
 struct applicationLayer {
     int fileDescriptor; /*Serial port descriptor*/
@@ -30,7 +30,7 @@ int main(int argc, char *argv[]){
     }
     sleep(0.5);
 
-    for(int j=0; j<8; j++){
+    for(int j=0; j<5; j++){
         sleep(1);
         // buf[0] = 0x7e;
         // buf[1] = 0x03;
@@ -57,26 +57,34 @@ int main(int argc, char *argv[]){
         // written_bytes = llwrite(al.fileDescriptor, buf, PACK_SIZE);
 
         for(int i = 0; i < PACK_SIZE; i++){
-            buf[i] = j;
+            buf[i] = j+1;
         }
 
-        buf[3] = 0x7e;
-        buf[4] = 0x7d;
+        buf[0] = 0x7d;
 
-        int frame_size = setFrame_DATA(buf_send, buf, PACK_SIZE, (j%2 == 0) ? 0x00 : 0x40);
-        printf("Full frame: ");
-        for(int i = 0; i < frame_size; i++){
-            printf("%02x ", buf_send[i]);
-        } printf("\n");
-        written_bytes = write(al.fileDescriptor, buf_send, frame_size);
+         buf[3] = 0x7e;
+         buf[4] = 0x7d;
 
-        printf("Application Layer: %d bytes written\n", written_bytes);
+        // buf[15] = 0x5e;
+        // buf[16] = 0x7d;
+
+        // buf[24] = 0x7d;
+        // buf[25] = 0x5d;
+
+        // int frame_size = setFrame_DATA(buf_send, buf, PACK_SIZE, (j%2 == 0) ? 0x00 : 0x40);
+        // printf("Full frame: ");
+        // for(int i = 0; i < frame_size; i++){
+        //     printf("%02x ", buf_send[i]);
+        // } printf("\n");
+        // written_bytes = write(al.fileDescriptor, buf_send, frame_size);
+        written_bytes = llwrite(al.fileDescriptor, buf, PACK_SIZE);
+        printf("Application Layer: %d bytes written\n\n\n", written_bytes);
     }
 
-    for(int i = 0; i<100; i++){
-        read(al.fileDescriptor, &incoming_byte, 1);
-        printf("reading[%d]: %02x\n", i, incoming_byte);
-    }
+    // for(int i = 0; i<100; i++){
+    //     read(al.fileDescriptor, &incoming_byte, 1);
+    //     printf("reading[%d]: %02x\n", i, incoming_byte);
+    // }
 
     llclose(al.fileDescriptor);
 

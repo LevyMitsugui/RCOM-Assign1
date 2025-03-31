@@ -2,7 +2,7 @@
 #include <stdio.h>
 
 #define PACK_SIZE 16
-#define MAXIMUM_FILE_SIZE 16384
+#define MAXIMUM_FILE_SIZE 0x80000//16384
 #define FILE_NAME "penguin.gif"
 #define PORT "/dev/pts/5"
 
@@ -32,25 +32,25 @@ int main(int argc, char *argv[]) {
     long cycles = 0;
     long bytes_until_now = 0;
 
+    long bytes_read = 0;
     long index_file = 0;
     long file_size = 0;
     u_int8_t buf_file[MAXIMUM_FILE_SIZE] = {0};
     u_int8_t buf_packet[PACK_SIZE] = {0};
 
-    while(llread(al.fileDescriptor, buf_packet, MAXIMUM_FILE_SIZE) >= PACK_SIZE){
-        printf("cycles: %ld  ", cycles++);
-        for(int i = 0; i < PACK_SIZE; i++){
-            buf_file[index_file] = buf_packet[i];
-            index_file+=1;
+    while(1){
+        bytes_read = llread(al.fileDescriptor, &buf_file[index_file], PACK_SIZE);
+        if (bytes_read <= 0)
+        {
+            printf("Error in llread\n");
+            break; //return -1;
         }
-        bytes_until_now += PACK_SIZE;
-        printf("bytes_until_now: %ld  ", bytes_until_now);
-        if(bytes_until_now == file_size){
-            printf("file_size: %ld\n", file_size);
-            break;
-        }
-    };
-    llclose(al.fileDescriptor);
+        index_file += bytes_read;
+        cycles+=1;
+        bytes_until_now += bytes_read;
+        printf("Cycle %ld of Application Layer, Received %ld bytes\n", cycles, bytes_read);
+    }
+    //llclose(al.fileDescriptor);
 
     FILE *file = fopen("output.gif", "wb");
     size_t bytes_written = fwrite(buf_file, 1, index_file, file);
@@ -63,29 +63,4 @@ int main(int argc, char *argv[]) {
     
 
     return 0;
-}
-
-
-
-
-int retrieve_packet(FILE* file_pointer, u_int8_t* packet_array, uid_t packet_size, long file_size){
-
-    if(ftell(file_pointer) >= file_size) return -1;
-
-    float remainder_bytes = (file_size%packet_size);
-    if((file_size - remainder_bytes) <= ftell(file_pointer)){
-
-        fread(packet_array, 1, remainder_bytes, file_pointer);
-        for(int i=remainder_bytes; i<packet_size;i++){
-            packet_array[i] = 0;
-        }
-        return 0;
-    } else {
-        fread(packet_array, 1, packet_size, file_pointer);
-    }
-
-    // for(int i=0; i<packet_size; i++){
-    //     printf("packet[%d]: %02x\n", i, packet_array[i]);
-    // }
-    return 1;
 }
